@@ -1,0 +1,488 @@
+# ============================================================================
+# Merchant Settlement Reconciliation - FUTURE FEATURE EXAMPLE
+# Version: 2.0 (TODO)
+# ============================================================================
+# ⚠️  WARNING: ONE-TO-MANY MODE IS NOT YET SUPPORTED IN VERSION 2.0
+#
+# This file demonstrates the planned one-to-many reconciliation mode.
+# Currently, only one-to-one mode is supported.
+#
+# This example will be enabled in a future version when one-to-many
+# reconciliation is implemented.
+# ============================================================================
+#
+# Business Scenario:
+#   Reconcile daily merchant settlement summaries (aggregated) against
+#   individual transaction details to ensure payouts are accurate.
+#
+# Data Sources:
+#   - Settlement Summary (SFTP CSV files) - Aggregated
+#   - Transaction Details (PostgreSQL) - Detailed transactions
+#
+# Reconciliation Mode: One-to-Many (TODO - NOT YET SUPPORTED)
+#   - One settlement record = Many transactions
+#   - Aggregate transactions by merchant_id + settlement_date
+#   - Compare aggregated amounts, counts, fees
+#
+# Planned Features for One-to-Many Mode:
+#   - Aggregation functions (SUM, COUNT, AVG, MIN, MAX)
+#   - Group-by keys for aggregation
+#   - Partial match handling
+#   - Orphan transaction detection
+#   - Aggregated comparisons in matching rules
+# ============================================================================
+
+# ============================================================================
+# TEMPORARY WORKAROUND: PRE-AGGREGATED ONE-TO-ONE MODE
+# ============================================================================
+# Until one-to-many is supported, users can work around this by:
+# 1. Pre-aggregate transaction details in SQL query
+# 2. Use one-to-one mode to compare aggregated data
+# 3. See example below
+# ============================================================================
+
+---
+# Data Source: Settlement Summary (SFTP)
+datasource:
+  name: settlement_summary_sftp
+  type: sftp
+  version: 1
+  description: "Daily settlement summary files from payment processor"
+
+  connection:
+    host: sftp.processor.com
+    port: 22
+    username: merchant_recon
+    private_key: ${SECRET:settlement_sftp_key}
+    timeout: 30
+
+  fetch:
+    directory: /settlements/daily
+    file_pattern: "settlement_{year}{month}{day}.csv"
+    encoding: UTF-8
+    compression: gzip  # Compression handled separately
+
+  format:
+    type: csv
+    delimiter: ","
+    header_row: true
+    trim_whitespace: true
+
+  metadata:
+    owner: settlements_team@company.com
+
+---
+# Data Source: Pre-Aggregated Transaction Details (PostgreSQL)
+# WORKAROUND: Pre-aggregate in SQL until one-to-many is supported
+datasource:
+  name: transaction_details_aggregated_db
+  type: database
+  version: 1
+  description: "Pre-aggregated transaction details (workaround for one-to-many)"
+
+  connection:
+    database_type: postgresql  # Only PostgreSQL supported
+    host: transactions-db.company.com
+    port: 5432
+    database: transactions
+    schema: public
+    username: recon_readonly
+    password: ${SECRET:transactions_db_password}
+    ssl_enabled: true
+
+  # WORKAROUND: Pre-aggregate in SQL query
+  # IMPORTANT: All timestamps must be in UTC
+  query_template: |
+    SELECT
+      merchant_id,
+      settlement_date,
+      SUM(amount) as total_amount,
+      SUM(fee_amount) as total_fees,
+      SUM(refund_amount) as total_refunds,
+      SUM(chargeback_amount) as total_chargebacks,
+      SUM(amount) - SUM(fee_amount) - SUM(refund_amount) - SUM(chargeback_amount) as net_amount,
+      COUNT(*) as transaction_count,
+      MAX(currency) as currency,  -- Assuming single currency per merchant
+      MAX(created_at AT TIME ZONE 'UTC') as last_updated  -- UTC timestamp
+    FROM payment_transactions
+    WHERE DATE(settlement_date AT TIME ZONE 'UTC') = '{year}-{month}-{day}'
+      AND status = 'SETTLED'
+    GROUP BY merchant_id, settlement_date
+    ORDER BY merchant_id
+
+  format:
+    type: tabular
+
+  metadata:
+    owner: data_team@company.com
+
+---
+# Schema: Settlement Summary (Version 2.0 - Lua transformations)
+schema:
+  name: settlement_summary_schema
+  version: 2
+  description: "Settlement summary schema with Lua transformations"
+
+  fields:
+    - name: merchant_id
+      type: string
+      required: true
+
+    # Date parsing with Lua
+    - name: settlement_date
+      type: date
+      required: true
+      transform: "parse_date(value, 'YYYY-MM-DD')"
+
+    # Type conversions with Lua
+    - name: total_amount
+      type: decimal
+      precision: 19
+      scale: 2
+      required: true
+      transform: "tonumber(value)"
+
+    - name: total_fees
+      type: decimal
+      precision: 19
+      scale: 2
+      required: true
+      transform: "tonumber(value)"
+
+    - name: total_refunds
+      type: decimal
+      precision: 19
+      scale: 2
+      required: false
+      transform: |
+        if value == nil or value == "" then
+          return 0.00
+        end
+        return tonumber(value)
+
+    - name: total_chargebacks
+      type: decimal
+      precision: 19
+      scale: 2
+      required: false
+      transform: |
+        if value == nil or value == "" then
+          return 0.00
+        end
+        return tonumber(value)
+
+    - name: net_amount
+      type: decimal
+      precision: 19
+      scale: 2
+      required: true
+      transform: "tonumber(value)"
+
+    - name: transaction_count
+      type: integer
+      required: true
+      transform: "tonumber(value)"
+
+    - name: currency
+      type: string
+      required: true
+
+---
+# Source Mapping: Settlement Summary
+source_mapping:
+  schema_ref: settlement_summary_schema:2
+  source_name: settlement_summary_sftp
+
+  field_mappings:
+    MerchantID: merchant_id
+    SettlementDate: settlement_date
+    TotalAmount: total_amount
+    TotalFees: total_fees
+    TotalRefunds: total_refunds
+    TotalChargebacks: total_chargebacks
+    NetAmount: net_amount
+    TransactionCount: transaction_count
+    Currency: currency
+
+---
+# Source Mapping: Pre-Aggregated Transactions
+source_mapping:
+  schema_ref: settlement_summary_schema:2
+  source_name: transaction_details_aggregated_db
+
+  field_mappings:
+    merchant_id: merchant_id
+    settlement_date: settlement_date
+    total_amount: total_amount
+    total_fees: total_fees
+    total_refunds: total_refunds
+    total_chargebacks: total_chargebacks
+    net_amount: net_amount
+    transaction_count: transaction_count
+    currency: currency
+
+---
+# Matching Rules (Version 2.0 - JOIN + WHERE pattern)
+# WORKAROUND: Compare pre-aggregated data using one-to-one mode
+matching_rules:
+  name: settlement_matching_rules
+  version: 2
+  description: "Match settlement summaries with pre-aggregated transactions (one-to-one workaround)"
+
+  # Join: Composite key (merchant_id + settlement_date)
+  join:
+    - left: source_a.merchant_id
+      right: source_b.merchant_id
+    - left: source_a.settlement_date
+      right: source_b.settlement_date
+
+  # Rules execute in declaration order
+  rules:
+    # Total amount match (with tolerance) - Lua
+    - name: total_amount_match
+      severity: error
+      description: "Total amount must match within $0.05"
+      script: |
+        return math.abs(source_a.total_amount - source_b.total_amount) <= 0.05
+
+    # Transaction count exact match
+    - name: transaction_count_match
+      severity: error
+      description: "Transaction count must match exactly"
+      left: source_a.transaction_count
+      operator: "="
+      right: source_b.transaction_count
+
+    # Total fees match (with tolerance) - Lua
+    - name: total_fees_match
+      severity: error
+      description: "Total fees must match within $0.05"
+      script: |
+        return math.abs(source_a.total_fees - source_b.total_fees) <= 0.05
+
+    # Total refunds match (warning level) - Lua
+    - name: total_refunds_match
+      severity: warning
+      description: "Total refunds should match"
+      script: |
+        local diff = math.abs(source_a.total_refunds - source_b.total_refunds)
+        if diff > 0.05 then
+          warning(string.format("Refund mismatch: $%.2f", diff))
+        end
+        return true  -- Warning level, always pass
+
+    # Net amount validation - Lua
+    - name: net_amount_validation
+      severity: error
+      description: "Net amount must match within $0.05"
+      script: |
+        -- Verify net amount calculation
+        local expected_net_a = source_a.total_amount - source_a.total_fees -
+                               source_a.total_refunds - source_a.total_chargebacks
+        local expected_net_b = source_b.total_amount - source_b.total_fees -
+                               source_b.total_refunds - source_b.total_chargebacks
+
+        -- Both should match their own net_amount field
+        local diff_a = math.abs(expected_net_a - source_a.net_amount)
+        local diff_b = math.abs(expected_net_b - source_b.net_amount)
+
+        if diff_a > 0.05 or diff_b > 0.05 then
+          return false
+        end
+
+        -- And they should match each other
+        return math.abs(source_a.net_amount - source_b.net_amount) <= 0.05
+
+    # Currency match
+    - name: currency_match
+      severity: error
+      description: "Currency must match"
+      left: source_a.currency
+      operator: "="
+      right: source_b.currency
+
+---
+# Reconciliation Job (Version 2.0 - One-to-One Workaround)
+reconciliation:
+  name: daily_merchant_settlement_reconciliation
+  version: 2
+  description: |
+    Daily merchant settlement reconciliation using one-to-one mode with
+    pre-aggregated transaction data.
+
+    NOTE: This is a workaround. True one-to-many mode is planned for a future version.
+
+  mode: one_to_one  # Only one-to-one supported (using pre-aggregated data)
+
+  # Reconciliation unit (preconfigured)
+  reconciliation_unit:
+    interval: day  # Process daily intervals
+    timezone: UTC  # Only UTC supported
+
+  # Runtime execution passes dateTimeRange (start inclusive, end exclusive):
+  # Example: --datetime-range 2024-03-15T00:00:00Z/2024-03-16T00:00:00Z
+
+  schedule:
+    enabled: true
+    cron: "0 10 * * *"  # Daily at 10 AM UTC (after settlements are posted)
+    timezone: UTC
+    auto_generate_range: yesterday  # Auto-generate dateTimeRange for yesterday
+
+  # Source A: Settlement Summary (aggregated)
+  source_a:
+    datasource: settlement_summary_sftp:1
+    schema: settlement_summary_schema:2
+
+    # Data quality checks
+    data_quality:
+      enabled: true
+      rules:
+        - type: not_null
+          columns: [merchant_id, settlement_date, total_amount, net_amount]
+        - type: range
+          column: total_amount
+          min: 0
+          max: 10000000  # $10M max per merchant per day
+      failure_threshold: 0.01
+
+  # Source B: Pre-aggregated Transaction Details
+  source_b:
+    datasource: transaction_details_aggregated_db:1
+    schema: settlement_summary_schema:2
+
+  matching_rules: settlement_matching_rules:2
+
+  duplicate_handling:
+    check_duplicates: true
+    action: error
+
+  # Outputs
+  outputs:
+    matched:
+      store: true
+      export:
+        format: csv  # CSV only
+        path: /reconciliation/settlements/{year}/{month}/matched_{year}{month}{day}.csv
+
+      # Named queries for match groups
+      queries:
+        - name: perfect_matches
+          description: "All rules passed"
+          rules_passed: [total_amount_match, transaction_count_match, total_fees_match,
+                         total_refunds_match, net_amount_validation, currency_match]
+
+        - name: refund_warnings
+          description: "Refund amount warnings"
+          rules_passed: [total_amount_match, transaction_count_match, total_fees_match,
+                         net_amount_validation, currency_match]
+          rules_failed: [total_refunds_match]
+
+        # Category-based queries using Lua
+        - name: high_value_settlements
+          description: "Settlements over $100K"
+          script: |
+            return source_a.total_amount > 100000
+
+        - name: high_refund_rate
+          description: "Settlements with >10% refund rate"
+          script: |
+            if source_a.total_amount == 0 then
+              return false
+            end
+            local refund_rate = source_a.total_refunds / source_a.total_amount
+            return refund_rate > 0.10
+
+    unmatched_left:
+      store: true
+      export:
+        format: csv  # CSV only
+        path: /reconciliation/settlements/{year}/{month}/unmatched_settlements_{year}{month}{day}.csv
+
+    unmatched_right:
+      store: true
+      export:
+        format: csv  # CSV only
+        path: /reconciliation/settlements/{year}/{month}/missing_summaries_{year}{month}{day}.csv
+
+  # Notifications
+  notifications:
+    on_completion:
+      - type: email
+        recipients:
+          - merchant_ops@company.com
+        subject: "Merchant Settlement Reconciliation Complete - {date}"
+        template: settlement_recon_complete
+
+    on_failure:
+      - type: email
+        recipients:
+          - ops_team@company.com
+        subject: "Settlement Reconciliation Failed - {date}"
+        template: reconciliation_failed
+        severity: critical
+
+    on_low_match_rate:
+      threshold: 0.98  # Higher threshold for settlements
+      recipients:
+        - finance_controller@company.com
+        - merchant_ops_manager@company.com
+      subject: "Low Settlement Match Rate Alert - {date}"
+
+    on_high_unmatched_amount:
+      threshold_amount: 10000  # Alert if > $10K unmatched
+      recipients:
+        - finance_controller@company.com
+      subject: "High Unmatched Settlement Amount - {date}"
+
+  # Retention policy
+  retention:
+    results_retention_days: 730  # 2 years for settlement data
+    audit_log_retention_days: 2555  # 7 years for compliance
+
+  metadata:
+    owner: merchant_operations@company.com
+    created_at: 2024-01-15T10:00:00Z
+    updated_at: 2024-03-01T14:30:00Z
+    business_criticality: high
+    sla: "Complete by 11 AM daily, 99.5% uptime"
+    notes: |
+      This reconciliation uses a workaround for one-to-many mode by pre-aggregating
+      transaction data in the SQL query. When one-to-many mode is implemented,
+      this can be simplified to use native aggregation features.
+
+# ============================================================================
+# FUTURE: One-to-Many Mode Example (NOT YET SUPPORTED)
+# ============================================================================
+# When one-to-many mode is implemented, the configuration would look like:
+#
+# reconciliation:
+#   mode: one_to_many
+#
+#   aggregation:
+#     direction: source_b_to_a  # Aggregate transactions to match settlement
+#     group_by:
+#       - merchant_id
+#       - settlement_date
+#     aggregations:
+#       - source_field: amount
+#         function: sum
+#         target_field: total_amount
+#       - source_field: fee_amount
+#         function: sum
+#         target_field: total_fees
+#       - source_field: transaction_id
+#         function: count
+#         target_field: transaction_count
+#
+#   matching_rules:
+#     join:
+#       - left: source_a.merchant_id
+#         right: group_by.merchant_id
+#       - left: source_a.settlement_date
+#         right: group_by.settlement_date
+#     rules:
+#       - name: total_amount_match
+#         severity: error
+#         script: |
+#           return math.abs(source_a.total_amount - aggregated.total_amount) <= 0.05
+# ============================================================================

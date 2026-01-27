@@ -1,0 +1,476 @@
+# ============================================================================
+# Bank Statement Reconciliation - Complete Example
+# Version: 2.0
+# ============================================================================
+# Business Scenario:
+#   Reconcile internal cash ledger against bank statement to ensure all
+#   deposits, withdrawals, and fees are properly accounted for.
+#
+# Data Sources:
+#   - Internal Cash Ledger (PostgreSQL - only PostgreSQL supported)
+#   - Bank Statement (SFTP CSV files from bank)
+#
+# Challenges:
+#   - No common transaction ID between systems
+#   - Must match on date + amount combination (composite join key)
+#   - Descriptions may vary significantly
+#   - Bank fees may not appear in internal ledger
+#
+# Matching Logic:
+#   - Join on transaction_date + amount (equality only, no fuzzy matching)
+#   - Transaction type must match (DEBIT/CREDIT)
+#   - Reference number validation (warning level) - Lua
+#   - Fuzzy description matching (warning level) - Lua
+#
+# Version 2.0 Changes:
+#   - Simplified matching rules (JOIN + WHERE pattern)
+#   - All transformations use Lua
+#   - CSV exports only
+#   - UTC-only timestamps
+#   - Named queries for match groups
+# ============================================================================
+
+---
+# Data Source: Internal Cash Ledger
+datasource:
+  name: internal_cash_ledger
+  type: database
+  version: 1
+  description: "Internal cash ledger tracking deposits and withdrawals"
+
+  connection:
+    database_type: postgresql  # Only PostgreSQL supported
+    host: ledger-db.company.com
+    port: 5432
+    database: accounting
+    schema: public
+    username: recon_readonly
+    password: ${SECRET:accounting_db_password}
+    ssl_enabled: true
+
+  # IMPORTANT: All timestamps must be in UTC
+  query_template: |
+    SELECT
+      entry_id,
+      entry_date,
+      description,
+      debit_amount,
+      credit_amount,
+      balance,
+      reference_number,
+      entry_type,
+      created_at  -- UTC timestamp
+    FROM cash_ledger
+    WHERE DATE(entry_date AT TIME ZONE 'UTC') = '{year}-{month}-{day}'
+      AND account_id = 'OPERATING_ACCOUNT'
+    ORDER BY entry_date, entry_id
+
+  format:
+    type: tabular
+
+  metadata:
+    owner: accounting_team@company.com
+
+---
+# Data Source: Bank Statement (SFTP)
+datasource:
+  name: bank_statement_sftp
+  type: sftp
+  version: 1
+  description: "Daily bank statement CSV files"
+
+  connection:
+    host: sftp.bankconnect.com
+    port: 22
+    username: company_recon
+    password: ${SECRET:bank_sftp_password}
+    timeout: 30
+
+  fetch:
+    directory: /statements/daily
+    file_pattern: "statement_{year}{month}{day}.csv"
+    encoding: UTF-8
+    compression: none
+
+  format:
+    type: csv
+    delimiter: ","
+    header_row: true
+    trim_whitespace: true
+
+  metadata:
+    owner: treasury_team@company.com
+
+---
+# Schema: Normalized Cash Movement (Version 2.0 - Lua transformations)
+schema:
+  name: cash_movement_schema
+  version: 2
+  description: "Normalized schema for cash movements with Lua transformations"
+
+  fields:
+    # Simple field mapping
+    - name: internal_id
+      type: string
+      required: false  # May not exist for bank records
+
+    # Date parsing with Lua
+    - name: transaction_date
+      type: date
+      required: true
+      transform: |
+        -- Parse date in DD/MM/YYYY format (from bank)
+        -- or YYYY-MM-DD format (from database)
+        return parse_date(value)
+
+    - name: description
+      type: string
+      required: true
+
+    # Type conversion with Lua
+    - name: amount
+      type: decimal
+      precision: 19
+      scale: 2
+      required: true
+      transform: "tonumber(value)"
+
+    - name: transaction_type
+      type: string
+      required: true  # DEBIT or CREDIT
+
+    - name: balance
+      type: decimal
+      precision: 19
+      scale: 2
+      required: false
+      transform: |
+        if value == nil or value == "" then
+          return nil
+        end
+        return tonumber(value)
+
+    - name: reference_number
+      type: string
+      required: false
+
+    - name: currency
+      type: string
+      required: true
+      default: "USD"
+
+    # Derived field - signed amount using Lua
+    - name: signed_amount
+      type: decimal
+      precision: 19
+      scale: 2
+      transform: |
+        if row.transaction_type == "CREDIT" then
+          return row.amount
+        else
+          return -1 * row.amount
+        end
+
+---
+# Source Mapping: Internal Ledger
+source_mapping:
+  schema_ref: cash_movement_schema:2
+  source_name: internal_cash_ledger
+
+  field_mappings:
+    entry_id: internal_id
+    entry_date: transaction_date
+    description: description
+    reference_number: reference_number
+
+  # Derived fields using Lua
+  derived_fields:
+    # Extract amount from debit/credit columns
+    - name: amount
+      transform: |
+        if row.debit_amount and row.debit_amount > 0 then
+          return row.debit_amount
+        else
+          return row.credit_amount or 0
+        end
+
+    # Determine transaction type
+    - name: transaction_type
+      transform: |
+        if row.debit_amount and row.debit_amount > 0 then
+          return "DEBIT"
+        else
+          return "CREDIT"
+        end
+
+  constants:
+    - name: currency
+      value: "USD"
+    - name: source_system
+      value: "INTERNAL_LEDGER"
+
+---
+# Source Mapping: Bank Statement
+source_mapping:
+  schema_ref: cash_movement_schema:2
+  source_name: bank_statement_sftp
+
+  field_mappings:
+    Date: transaction_date
+    Description: description
+    Balance: balance
+    Reference: reference_number
+
+  # Derived fields using Lua
+  derived_fields:
+    # Determine transaction type from amount sign
+    - name: transaction_type
+      transform: |
+        if row.Amount < 0 then
+          return "DEBIT"
+        else
+          return "CREDIT"
+        end
+
+    # Convert signed amount to absolute value
+    - name: amount
+      transform: "math.abs(row.Amount)"
+
+  constants:
+    - name: currency
+      value: "USD"
+    - name: source_system
+      value: "BANK_STATEMENT"
+
+---
+# Matching Rules (Version 2.0 - JOIN + WHERE pattern)
+matching_rules:
+  name: bank_statement_matching_rules
+  version: 2
+  description: "Match internal ledger with bank statement using simplified pattern"
+
+  # Join: Composite key (date + amount), equality only
+  join:
+    - left: source_a.transaction_date
+      right: source_b.transaction_date
+    - left: source_a.amount
+      right: source_b.amount
+
+  # Rules execute in declaration order
+  rules:
+    # Transaction type must match
+    - name: transaction_type_match
+      severity: error
+      description: "Debit/Credit type must match"
+      left: source_a.transaction_type
+      operator: "="
+      right: source_b.transaction_type
+
+    # Reference number match (warning level) - Lua
+    - name: reference_number_match
+      severity: warning
+      description: "Reference numbers should match if present"
+      script: |
+        local ref_a = source_a.reference_number
+        local ref_b = source_b.reference_number
+
+        -- If either is null, pass with warning
+        if ref_a == nil or ref_a == "" or ref_b == nil or ref_b == "" then
+          warning("Reference number missing from one source")
+          return true
+        end
+
+        -- Case-insensitive comparison
+        local ref_a_upper = string.upper(string.gsub(ref_a, "^%s*(.-)%s*$", "%1"))
+        local ref_b_upper = string.upper(string.gsub(ref_b, "^%s*(.-)%s*$", "%1"))
+
+        if ref_a_upper ~= ref_b_upper then
+          warning(string.format("Reference mismatch: '%s' != '%s'", ref_a, ref_b))
+        end
+
+        return true  -- Warning level, always pass
+
+    # Description similarity (fuzzy matching - warning) - Lua
+    - name: description_similarity
+      severity: warning
+      description: "Descriptions should be similar"
+      script: |
+        local ledger_desc = string.upper(source_a.description or "")
+        local bank_desc = string.upper(source_b.description or "")
+
+        -- If either is empty, pass with warning
+        if ledger_desc == "" or bank_desc == "" then
+          warning("Missing description")
+          return true
+        end
+
+        -- Check if one contains the other
+        if string.find(ledger_desc, bank_desc, 1, true) or
+           string.find(bank_desc, ledger_desc, 1, true) then
+          return true
+        end
+
+        -- Calculate simple similarity (Levenshtein distance)
+        local similarity = calculate_levenshtein_similarity(ledger_desc, bank_desc)
+        if similarity < 0.5 then
+          warning(string.format("Low description similarity: %.2f (Ledger: '%s', Bank: '%s')",
+                                similarity, source_a.description, source_b.description))
+        end
+
+        return true  -- Warning level, always pass
+
+---
+# Reconciliation Job (Version 2.0)
+reconciliation:
+  name: daily_bank_statement_reconciliation
+  version: 2
+  description: "Daily bank statement reconciliation"
+
+  mode: one_to_one  # Only one-to-one supported
+
+  # Reconciliation unit (preconfigured)
+  reconciliation_unit:
+    interval: day  # Process daily intervals
+    timezone: UTC  # Only UTC supported
+
+  # Runtime execution passes dateTimeRange (start inclusive, end exclusive):
+  # Example: --datetime-range 2024-03-15T00:00:00Z/2024-03-16T00:00:00Z
+
+  schedule:
+    enabled: true
+    cron: "0 8 * * *"  # Daily at 8 AM UTC (after bank posts statement)
+    timezone: UTC
+    auto_generate_range: yesterday  # Auto-generate dateTimeRange for yesterday
+
+  # Source A: Internal Ledger
+  source_a:
+    datasource: internal_cash_ledger:1
+    schema: cash_movement_schema:2
+
+    data_quality:
+      enabled: true
+      rules:
+        - type: not_null
+          columns: [entry_date, amount]
+        - type: range
+          column: amount
+          min: 0.01
+          max: 10000000
+      failure_threshold: 0.01
+
+  # Source B: Bank Statement
+  source_b:
+    datasource: bank_statement_sftp:1
+    schema: cash_movement_schema:2
+
+  matching_rules: bank_statement_matching_rules:2
+
+  # Duplicate handling (can have multiple transactions on same day with same amount)
+  duplicate_handling:
+    check_duplicates: true
+    action: warning  # Warn but allow (common in bank statements)
+    report_duplicates: true
+
+  # Outputs
+  outputs:
+    matched:
+      store: true
+      export:
+        format: csv  # CSV only
+        path: /reconciliation/bank-statements/{year}/{month}/matched_{year}{month}{day}.csv
+
+      # Named queries for match groups
+      queries:
+        - name: perfect_matches
+          description: "All rules passed, no warnings"
+          rules_passed: [transaction_type_match, reference_number_match, description_similarity]
+
+        - name: reference_warnings
+          description: "Reference number warnings"
+          rules_passed: [transaction_type_match, description_similarity]
+          rules_failed: [reference_number_match]
+
+        - name: description_warnings
+          description: "Description similarity warnings"
+          rules_passed: [transaction_type_match, reference_number_match]
+          rules_failed: [description_similarity]
+
+        - name: all_warnings
+          description: "Any warnings present"
+          rules_failed: [reference_number_match, description_similarity]
+
+        # Category-based queries using Lua
+        - name: bank_fees
+          description: "Bank fees and charges"
+          script: |
+            local desc = string.upper(source_b.description or "")
+            return string.find(desc, "FEE") or string.find(desc, "CHARGE")
+
+        - name: interest_transactions
+          description: "Interest credits/debits"
+          script: |
+            local desc = string.upper(source_b.description or "")
+            return string.find(desc, "INTEREST")
+
+        - name: wire_transfers
+          description: "Wire transfers"
+          script: |
+            local desc = string.upper(source_b.description or "")
+            return string.find(desc, "WIRE")
+
+    unmatched_left:
+      store: true
+      export:
+        format: csv  # CSV only
+        path: /reconciliation/bank-statements/{year}/{month}/unmatched_ledger_{year}{month}{day}.csv
+
+    unmatched_right:
+      store: true
+      export:
+        format: csv  # CSV only
+        path: /reconciliation/bank-statements/{year}/{month}/unmatched_bank_{year}{month}{day}.csv
+
+  # Notifications
+  notifications:
+    on_completion:
+      - type: email
+        recipients:
+          - treasury_team@company.com
+          - accounting_team@company.com
+        subject: "Bank Reconciliation Complete - {date}"
+        template: bank_recon_complete
+
+    on_failure:
+      - type: email
+        recipients:
+          - ops_team@company.com
+        subject: "Bank Reconciliation Failed - {date}"
+        template: reconciliation_failed
+        severity: critical
+
+    on_low_match_rate:
+      threshold: 0.90  # Bank recon typically has more unmatched (fees, interest, etc.)
+      recipients:
+        - treasury_manager@company.com
+      subject: "Low Bank Match Rate Alert - {date}"
+
+    on_high_unmatched_amount:
+      threshold_amount: 5000  # Alert if > $5K unmatched
+      recipients:
+        - treasury_manager@company.com
+        - cfo@company.com
+      subject: "High Unmatched Bank Amount - {date}"
+      severity: high
+
+  # Retention policy
+  retention:
+    results_retention_days: 2555  # 7 years for financial records
+    audit_log_retention_days: 2555  # 7 years for compliance
+
+  metadata:
+    owner: treasury@company.com
+    created_at: 2024-01-15T10:00:00Z
+    updated_at: 2024-03-01T14:30:00Z
+    business_criticality: critical
+    compliance_requirement: "SOX, Bank Reconciliation Policy"
+    sla: "Complete by 9 AM daily, 99.9% uptime"

@@ -4,6 +4,8 @@
 
 The Reconciliation Engine is a mission-critical SaaS platform designed for large fintech systems to perform automated, configurable reconciliation of financial transactions across multiple data sources. The system enables financial institutions to match, verify, and audit transactions with complete traceability and explainability.
 
+**NOTE: In this document, LUA is used to express dynamic configuration templates without recompiling the engine again. It doesn't mean we will/must use LUA**
+
 ### Key Capabilities
 - **Multi-source reconciliation**: Compare data from SFTP files, APIs, and databases
 - **Flexible matching rules**: Support for join-based, tolerance-based, and conditional matching
@@ -11,6 +13,7 @@ The Reconciliation Engine is a mission-critical SaaS platform designed for large
 - **High performance**: Handle 1M x 1M transaction reconciliations per second
 - **Multi-tenant SaaS**: Isolated tenant data with configurable retention policies
 - **Configuration-driven**: YAML-based DSL with web UI for non-technical users
+
 
 ## 2. System Scope
 

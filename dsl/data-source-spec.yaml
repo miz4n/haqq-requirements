@@ -1,0 +1,661 @@
+# Data Source DSL Specification
+# Version: 2.0
+# This file defines the YAML schema for data source configurations
+# Based on requirements/02-data-sources.md
+#
+# Key Changes:
+# - Removed incremental fetch mode (not supported)
+# - Only UTC timezone supported
+# - PostgreSQL only for database sources
+# - Compression and encryption extracted from data source
+
+---
+# ============================================================================
+# SFTP Data Source Example
+# ============================================================================
+datasource:
+  # Required: Unique identifier for this datasource
+  name: payment_gateway_sftp
+
+  # Required: Type of datasource
+  type: sftp
+
+  # Required: Version for change tracking
+  version: 1
+
+  # Optional: Human-readable description
+  description: "Daily settlement files from payment gateway via SFTP"
+
+  # Required: Connection configuration
+  connection:
+    # Required: SFTP server hostname or IP
+    host: sftp.paymentgateway.com
+
+    # Optional: SSH port (default: 22)
+    port: 22
+
+    # Required: SSH username
+    username: recon_user
+
+    # Authentication: Either password OR private_key required
+    # Option 1: Password authentication
+    password: ${SECRET:sftp_password}
+
+    # Option 2: Private key authentication
+    # private_key: ${SECRET:sftp_private_key}
+    # private_key_passphrase: ${SECRET:key_passphrase}  # Optional
+
+    # Optional: Connection timeout in seconds
+    timeout: 30
+
+  # Required: File fetch configuration
+  fetch:
+    # Required: Base directory on SFTP server
+    directory: /data/settlements
+
+    # Required: File pattern with reconciliation unit templates
+    # Supported templates: {year}, {month}, {day}, {hour}, {minute}
+    file_pattern: "settlement_{year}{month}{day}.csv"
+
+    # Optional: File encoding (default: UTF-8)
+    encoding: UTF-8
+
+    # Optional: Compression format (none, gzip, zip, bzip2)
+    # Note: Compression is handled separately from fetch
+    compression: none
+
+    # Optional: Multiple file handling (concatenate, first, last)
+    multiple_files: concatenate
+
+  # Required: Data format configuration (see 03-data-formats.md)
+  format:
+    type: csv
+    delimiter: ","
+    header_row: true
+
+  # Optional: Metadata
+  metadata:
+    owner: finance_team@company.com
+    created_at: 2024-01-15T10:00:00Z
+    updated_at: 2024-03-01T14:30:00Z
+    data_classification: confidential
+    retention_days: 90
+
+---
+# ============================================================================
+# SFTP with Compression Example
+# ============================================================================
+datasource:
+  name: compressed_settlement_files
+  type: sftp
+  version: 1
+  description: "Compressed settlement files"
+
+  connection:
+    host: sftp.gateway.com
+    port: 22
+    username: recon_user
+    password: ${SECRET:sftp_password}
+
+  fetch:
+    directory: /data/settlements
+    # Compressed file pattern
+    file_pattern: "settlement_{year}{month}{day}.csv.gz"
+    encoding: UTF-8
+    compression: gzip  # System will decompress before processing
+
+  format:
+    type: csv
+    delimiter: ","
+    header_row: true
+
+---
+# ============================================================================
+# SFTP with Encryption Example
+# ============================================================================
+datasource:
+  name: encrypted_settlement_files
+  type: sftp
+  version: 1
+  description: "PGP encrypted settlement files"
+
+  connection:
+    host: sftp.gateway.com
+    port: 22
+    username: recon_user
+    private_key: ${SECRET:sftp_private_key}
+
+  fetch:
+    directory: /data/settlements
+    # Encrypted file pattern
+    file_pattern: "settlement_{year}{month}{day}.csv.pgp"
+
+  # Encryption configuration (handled separately from fetch)
+  encryption:
+    type: pgp
+    private_key: ${SECRET:pgp_private_key}
+    passphrase: ${SECRET:pgp_passphrase}
+
+  format:
+    type: csv
+    delimiter: ","
+    header_row: true
+
+---
+# ============================================================================
+# API Data Source Example
+# ============================================================================
+datasource:
+  name: payment_gateway_api
+  type: api
+  version: 2
+  description: "Payment gateway REST API for settlement data"
+
+  connection:
+    # Required: Base URL
+    base_url: https://api.paymentgateway.com
+
+    # Required: API endpoint (can include templates)
+    endpoint: /v2/settlements
+
+    # Optional: HTTP method (default: GET)
+    method: GET
+
+    # Required: Authentication type
+    auth_type: bearer
+
+    # Required: Authentication credentials (type-specific)
+    auth_credentials:
+      token: ${SECRET:gateway_api_token}
+
+    # Alternative auth types:
+    # auth_type: api_key
+    # auth_credentials:
+    #   header_name: X-API-Key
+    #   api_key: ${SECRET:api_key}
+
+    # auth_type: basic
+    # auth_credentials:
+    #   username: api_user
+    #   password: ${SECRET:api_password}
+
+    # auth_type: oauth2
+    # auth_credentials:
+    #   grant_type: client_credentials
+    #   token_url: https://auth.gateway.com/oauth/token
+    #   client_id: ${SECRET:oauth_client_id}
+    #   client_secret: ${SECRET:oauth_client_secret}
+    #   scope: reconciliation:read
+
+    # Optional: Additional HTTP headers
+    headers:
+      Accept: application/json
+      User-Agent: ReconciliationEngine/2.0
+
+    # Required: Query parameters (support templates)
+    query_params:
+      settlement_date: "{year}-{month}-{day}"
+      format: json
+
+    # Optional: Request timeout in seconds
+    timeout_seconds: 60
+
+  # Optional: Pagination configuration
+  pagination:
+    type: cursor  # or 'offset', 'page'
+    page_size: 1000
+    cursor_param: next_token
+    next_cursor_field: pagination.next_token
+
+    # For offset pagination:
+    # type: offset
+    # offset_param: offset
+    # limit_param: limit
+    # total_count_field: response.total_count
+
+  # Optional: Rate limiting
+  rate_limit:
+    requests_per_second: 20
+    requests_per_minute: 1000
+    retry_on_429: true
+    retry_max_attempts: 5
+    retry_backoff: exponential
+
+  # Optional: Response data extraction
+  response:
+    # JSONPath to data array in response
+    data_path: data.settlements
+
+  format:
+    type: json
+    array_path: data.settlements
+
+  metadata:
+    owner: integrations_team@company.com
+    created_at: 2024-01-15T10:00:00Z
+
+---
+# ============================================================================
+# PostgreSQL Database Data Source Example
+# ============================================================================
+datasource:
+  name: internal_ledger_postgres
+  type: database
+  version: 1
+  description: "Internal transaction ledger (PostgreSQL)"
+
+  connection:
+    # Required: Database type (only postgresql supported)
+    database_type: postgresql
+
+    # Required: Database server hostname
+    host: ledger-db.internal.company.com
+
+    # Optional: Database port (default: 5432)
+    port: 5432
+
+    # Required: Database name
+    database: ledger
+
+    # Optional: Schema name (default: public)
+    schema: public
+
+    # Required: Database username
+    username: recon_readonly
+
+    # Required: Database password
+    password: ${SECRET:ledger_db_password}
+
+    # Optional: SSL configuration
+    ssl_enabled: true
+    ssl_cert: ${SECRET:db_ssl_cert}
+
+    # Optional: Connection pool configuration
+    connection_pool:
+      min_size: 2
+      max_size: 10
+      idle_timeout_seconds: 300
+      max_lifetime_seconds: 1800
+
+  # Required: SQL query template (supports reconciliation unit templates)
+  # IMPORTANT: All timestamps must be in UTC
+  query_template: |
+    SELECT
+      transaction_id,
+      account_id,
+      transaction_type,
+      amount,
+      currency,
+      status,
+      created_at,  -- UTC timestamp
+      updated_at   -- UTC timestamp
+    FROM transactions
+    WHERE DATE(created_at AT TIME ZONE 'UTC') = '{year}-{month}-{day}'
+      AND status IN ('COMPLETED', 'SETTLED')
+    ORDER BY transaction_id
+
+  # Optional: Query limits
+  query_limits:
+    max_rows: 10000000  # 10M rows
+    timeout_seconds: 600
+
+  format:
+    type: tabular  # SQL result set
+
+  metadata:
+    owner: data_team@company.com
+    created_at: 2024-01-15T10:00:00Z
+
+---
+# ============================================================================
+# PostgreSQL with Hourly Interval
+# ============================================================================
+datasource:
+  name: hourly_transaction_ledger
+  type: database
+  version: 1
+  description: "Hourly transaction data from PostgreSQL"
+
+  connection:
+    database_type: postgresql
+    host: ledger-db.company.com
+    port: 5432
+    database: ledger
+    username: recon_user
+    password: ${SECRET:db_password}
+
+  # Query template for hourly interval
+  # Templates: {year}, {month}, {day}, {hour}
+  query_template: |
+    SELECT
+      transaction_id,
+      amount,
+      currency,
+      created_at
+    FROM transactions
+    WHERE created_at >= '{year}-{month}-{day} {hour}:00:00'::timestamp
+      AND created_at < '{year}-{month}-{day} {hour}:00:00'::timestamp + interval '1 hour'
+    ORDER BY created_at
+
+  format:
+    type: tabular
+
+---
+# ============================================================================
+# Data Source with Patches Example
+# ============================================================================
+datasource:
+  name: internal_ledger_with_patches
+  type: database
+  version: 1
+  description: "Ledger with manual correction patches"
+
+  connection:
+    database_type: postgresql
+    host: ledger-db.company.com
+    port: 5432
+    database: ledger
+    username: recon_user
+    password: ${SECRET:db_password}
+
+  query_template: |
+    SELECT * FROM transactions
+    WHERE DATE(created_at) = '{year}-{month}-{day}'
+
+  format:
+    type: tabular
+
+  # Optional: Patch configuration
+  patches:
+    enabled: true
+
+    # Patch sources (applied in order)
+    patch_sources:
+      # SFTP patch files
+      - type: sftp
+        host: sftp.company.com
+        username: patch_user
+        password: ${SECRET:patch_sftp_password}
+        directory: /patches
+        file_pattern: "ledger_patch_{year}{month}{day}.csv"
+
+      # Manual patch files from local filesystem
+      - type: file
+        path: /manual_patches/{year}-{month}-{day}-corrections.csv
+
+    # Conflict resolution strategy
+    conflict_resolution: latest  # or 'earliest', 'error'
+
+---
+# ============================================================================
+# Data Source with Preview Configuration
+# ============================================================================
+datasource:
+  name: ledger_with_preview
+  type: database
+  version: 1
+  description: "Ledger with preview enabled for testing"
+
+  connection:
+    database_type: postgresql
+    host: ledger-db.company.com
+    port: 5432
+    database: ledger
+    username: recon_user
+    password: ${SECRET:db_password}
+
+  query_template: |
+    SELECT * FROM transactions
+    WHERE DATE(created_at) = '{year}-{month}-{day}'
+
+  format:
+    type: tabular
+
+  # Optional: Test/preview configuration
+  preview:
+    enabled: true
+    sample_rows: 100
+    # Use specific date for preview
+    sample_date: 2024-03-15
+
+---
+# ============================================================================
+# SFTP with JSON Format
+# ============================================================================
+datasource:
+  name: gateway_json_sftp
+  type: sftp
+  version: 1
+  description: "JSON settlement files via SFTP"
+
+  connection:
+    host: sftp.gateway.com
+    port: 22
+    username: recon_user
+    password: ${SECRET:sftp_password}
+
+  fetch:
+    directory: /data/json
+    file_pattern: "settlements_{year}{month}{day}.json"
+    encoding: UTF-8
+
+  format:
+    type: json
+    array_path: settlements  # Extract array from JSON
+
+---
+# ============================================================================
+# SFTP with JSONL Format
+# ============================================================================
+datasource:
+  name: gateway_jsonl_sftp
+  type: sftp
+  version: 1
+  description: "Line-delimited JSON files via SFTP"
+
+  connection:
+    host: sftp.gateway.com
+    port: 22
+    username: recon_user
+    password: ${SECRET:sftp_password}
+
+  fetch:
+    directory: /data/jsonl
+    file_pattern: "settlements_{year}{month}{day}.jsonl"
+    encoding: UTF-8
+
+  format:
+    type: jsonl  # Line-delimited JSON
+
+---
+# ============================================================================
+# API with Nested JSON Response
+# ============================================================================
+datasource:
+  name: payment_api_nested
+  type: api
+  version: 1
+  description: "API with nested JSON response"
+
+  connection:
+    base_url: https://api.gateway.com
+    endpoint: /settlements
+    method: GET
+    auth_type: bearer
+    auth_credentials:
+      token: ${SECRET:api_token}
+    query_params:
+      date: "{year}-{month}-{day}"
+
+  # Extract nested data
+  response:
+    data_path: response.data.settlements
+
+  format:
+    type: json
+    array_path: null  # Already extracted via data_path
+    flatten_nested: true
+    nested_separator: "."
+
+---
+# ============================================================================
+# Complete Data Source Example with All Options
+# ============================================================================
+datasource:
+  name: production_ledger
+  version: 3
+  type: database
+  description: |
+    Production ledger database - primary source for reconciliation
+
+    Owner: Finance Operations Team
+    SLA: 99.9% uptime
+    Data Availability: Daily at 08:00 UTC
+
+  # Metadata
+  created_at: 2024-01-15T10:00:00Z
+  created_by: john.doe@company.com
+  updated_at: 2024-03-01T14:30:00Z
+  updated_by: jane.smith@company.com
+
+  # Changelog
+  changelog:
+    - version: 3
+      date: 2024-03-01
+      changes: "Updated to version 2.0 spec (UTC only, no incremental)"
+      author: jane.smith@company.com
+
+    - version: 2
+      date: 2024-02-01
+      changes: "Added connection pool configuration"
+      author: john.doe@company.com
+
+    - version: 1
+      date: 2024-01-15
+      changes: "Initial data source configuration"
+      author: john.doe@company.com
+
+  connection:
+    database_type: postgresql
+    host: prod-ledger-db.company.com
+    port: 5432
+    database: ledger
+    schema: public
+    username: recon_readonly
+    password: ${SECRET:prod_ledger_password}
+    ssl_enabled: true
+    connection_pool:
+      min_size: 5
+      max_size: 20
+      idle_timeout_seconds: 300
+
+  query_template: |
+    SELECT
+      transaction_id,
+      merchant_id,
+      amount,
+      currency,
+      status,
+      transaction_type,
+      created_at,  -- UTC
+      updated_at,  -- UTC
+      metadata
+    FROM transactions
+    WHERE DATE(created_at AT TIME ZONE 'UTC') = '{year}-{month}-{day}'
+      AND status IN ('COMPLETED', 'SETTLED')
+      AND is_deleted = false
+    ORDER BY transaction_id
+
+  query_limits:
+    max_rows: 50000000
+    timeout_seconds: 1800  # 30 minutes
+
+  format:
+    type: tabular
+
+  # Patches for manual corrections
+  patches:
+    enabled: true
+    patch_sources:
+      - type: sftp
+        host: sftp.company.com
+        username: patch_user
+        password: ${SECRET:patch_password}
+        directory: /patches/ledger
+        file_pattern: "ledger_patch_{year}{month}{day}.csv"
+    conflict_resolution: latest
+
+  # Preview configuration
+  preview:
+    enabled: true
+    sample_rows: 1000
+    sample_date: 2024-03-15
+
+  metadata:
+    owner: finance_team@company.com
+    contact: finops@company.com
+    data_classification: confidential
+    sla_uptime: 99.9%
+    retention_days: 2555  # 7 years
+
+---
+# ============================================================================
+# Data Source Versioning Example
+# ============================================================================
+datasource:
+  name: evolving_data_source
+  version: 4
+  type: database
+
+  # Version metadata
+  created_at: 2024-01-15T10:00:00Z
+  created_by: john.doe@company.com
+  updated_at: 2024-03-01T14:30:00Z
+  updated_by: jane.smith@company.com
+
+  # Detailed changelog
+  changelog:
+    - version: 4
+      date: 2024-03-01
+      changes: "Removed incremental fetch (not supported in v2.0)"
+      author: jane.smith@company.com
+      breaking: true
+
+    - version: 3
+      date: 2024-02-15
+      changes: "Changed to UTC-only timestamps"
+      author: jane.smith@company.com
+      breaking: false
+
+    - version: 2
+      date: 2024-02-01
+      changes: "Added fee_amount column to query"
+      author: john.doe@company.com
+      breaking: false
+
+    - version: 1
+      date: 2024-01-15
+      changes: "Initial configuration"
+      author: john.doe@company.com
+      breaking: false
+
+  connection:
+    database_type: postgresql
+    host: ledger-db.company.com
+    port: 5432
+    database: ledger
+    username: recon_user
+    password: ${SECRET:db_password}
+
+  query_template: |
+    SELECT
+      transaction_id,
+      amount,
+      currency,
+      fee_amount,  -- Added in v2
+      created_at   -- UTC in v3+
+    FROM transactions
+    WHERE DATE(created_at) = '{year}-{month}-{day}'
+
+  format:
+    type: tabular

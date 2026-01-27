@@ -1,0 +1,574 @@
+# Matching Rules DSL Specification
+# Version: 2.0
+# This file defines the YAML schema for matching rule configurations
+# Based on requirements/05-matching-rules.md
+
+---
+# ============================================================================
+# Basic Join Rule (Single Column)
+# ============================================================================
+matching_rules:
+  name: basic_join_rules
+  version: 1
+  description: "Basic join on transaction ID"
+
+  # Join conditions (equality only, = is implicit)
+  join:
+    - left: source_a.transaction_id
+      right: source_b.transaction_id
+
+  # Rules execute in declaration order (no order: field)
+  rules:
+    - name: currency_match
+      severity: error
+      left: source_a.currency
+      operator: "="
+      right: source_b.currency
+
+    - name: amount_match
+      severity: error
+      left: source_a.amount
+      operator: "="
+      right: source_b.amount
+
+---
+# ============================================================================
+# Multi-Column Join
+# ============================================================================
+matching_rules:
+  name: composite_key_rules
+  version: 1
+  description: "Join on multiple columns"
+
+  join:
+    - left: source_a.merchant_id
+      right: source_b.merchant_id
+    - left: source_a.transaction_date
+      right: source_b.transaction_date
+
+  rules:
+    - name: amount_match
+      severity: error
+      left: source_a.amount
+      operator: "="
+      right: source_b.amount
+
+---
+# ============================================================================
+# Comparison Operators
+# ============================================================================
+matching_rules:
+  name: comparison_rules
+  version: 1
+  description: "Basic comparison operators"
+
+  join:
+    - left: source_a.transaction_id
+      right: source_b.transaction_id
+
+  rules:
+    # Equality
+    - name: exact_amount_match
+      severity: error
+      left: source_a.amount
+      operator: "="
+      right: source_b.amount
+
+    # Inequality
+    - name: status_not_pending
+      severity: error
+      left: source_a.status
+      operator: "!="
+      right: "PENDING"
+
+    # Less than
+    - name: fee_under_threshold
+      severity: warning
+      left: source_b.fee
+      operator: "<"
+      right: 10.00
+
+    # Less than or equal
+    - name: amount_not_exceeded
+      severity: error
+      left: source_b.amount
+      operator: "<="
+      right: source_a.amount
+
+    # Greater than
+    - name: amount_above_minimum
+      severity: error
+      left: source_a.amount
+      operator: ">"
+      right: 0.00
+
+    # Greater than or equal
+    - name: settlement_after_transaction
+      severity: error
+      left: source_b.settlement_date
+      operator: ">="
+      right: source_a.transaction_date
+
+---
+# ============================================================================
+# Boolean Operators - AND
+# ============================================================================
+matching_rules:
+  name: boolean_and_rules
+  version: 1
+  description: "AND operator - all operands must be true"
+
+  join:
+    - left: source_a.transaction_id
+      right: source_b.transaction_id
+
+  rules:
+    - name: complete_match
+      severity: error
+      operator: AND
+      operands:
+        - left: source_a.amount
+          operator: "="
+          right: source_b.amount
+        - left: source_a.currency
+          operator: "="
+          right: source_b.currency
+        - left: source_a.status
+          operator: "="
+          right: "COMPLETED"
+
+---
+# ============================================================================
+# Boolean Operators - OR
+# ============================================================================
+matching_rules:
+  name: boolean_or_rules
+  version: 1
+  description: "OR operator - at least one operand must be true"
+
+  join:
+    - left: source_a.transaction_id
+      right: source_b.transaction_id
+
+  rules:
+    - name: reference_match
+      severity: error
+      operator: OR
+      operands:
+        - left: source_a.primary_ref
+          operator: "="
+          right: source_b.reference_id
+        - left: source_a.secondary_ref
+          operator: "="
+          right: source_b.reference_id
+
+---
+# ============================================================================
+# Boolean Operators - NOT
+# ============================================================================
+matching_rules:
+  name: boolean_not_rules
+  version: 1
+  description: "NOT operator - operand must be false"
+
+  join:
+    - left: source_a.transaction_id
+      right: source_b.transaction_id
+
+  rules:
+    - name: not_test_transaction
+      severity: error
+      operator: NOT
+      operand:
+        left: source_a.is_test
+        operator: "="
+        right: true
+
+---
+# ============================================================================
+# Nested Boolean Operators
+# ============================================================================
+matching_rules:
+  name: nested_boolean_rules
+  version: 1
+  description: "Complex nested boolean expressions"
+
+  join:
+    - left: source_a.transaction_id
+      right: source_b.transaction_id
+
+  rules:
+    - name: complex_validation
+      severity: error
+      operator: AND
+      operands:
+        - left: source_a.currency
+          operator: "="
+          right: source_b.currency
+        - operator: OR
+          operands:
+            - left: source_a.amount
+              operator: "="
+              right: source_b.amount
+            - left: source_a.manual_override
+              operator: "="
+              right: true
+
+---
+# ============================================================================
+# Lua Script Rules - Simple
+# ============================================================================
+matching_rules:
+  name: lua_simple_rules
+  version: 1
+  description: "Simple Lua script for tolerance check"
+
+  join:
+    - left: source_a.transaction_id
+      right: source_b.transaction_id
+
+  rules:
+    - name: amount_tolerance
+      severity: error
+      script: |
+        return math.abs(source_a.amount - source_b.amount) <= 0.01
+
+---
+# ============================================================================
+# Lua Script Rules - Complex Logic
+# ============================================================================
+matching_rules:
+  name: lua_complex_rules
+  version: 1
+  description: "Complex business logic in Lua"
+
+  join:
+    - left: source_a.transaction_id
+      right: source_b.transaction_id
+
+  rules:
+    - name: tiered_fee_validation
+      severity: warning
+      script: |
+        -- Calculate expected fee based on amount
+        local expected_fee = 0.0
+        if source_a.amount <= 100 then
+          expected_fee = 2.50
+        elseif source_a.amount <= 1000 then
+          expected_fee = 5.00
+        else
+          expected_fee = source_a.amount * 0.005
+        end
+
+        -- Check if actual fee matches expected (with tolerance)
+        local actual_fee = source_b.fee_amount or 0
+        return math.abs(expected_fee - actual_fee) <= 0.10
+
+---
+# ============================================================================
+# Lua Script Rules - Time Window
+# ============================================================================
+matching_rules:
+  name: lua_time_window_rules
+  version: 1
+  description: "Time window validation using Lua"
+
+  join:
+    - left: source_a.transaction_id
+      right: source_b.transaction_id
+
+  rules:
+    - name: timestamp_within_window
+      severity: warning
+      script: |
+        -- Check if timestamps are within 10 minutes (600 seconds)
+        local diff_seconds = timestamp_diff(source_a.created_at, source_b.transaction_time)
+        return math.abs(diff_seconds) <= 600
+
+    - name: settlement_within_business_days
+      severity: warning
+      script: |
+        -- Check if settlement is within 2 business days
+        local days = days_between(source_a.transaction_date, source_b.settlement_date)
+        return days >= 0 and days <= 2
+
+---
+# ============================================================================
+# Lua Script Rules - Conditional Tolerance
+# ============================================================================
+matching_rules:
+  name: lua_conditional_tolerance
+  version: 1
+  description: "Dynamic tolerance based on transaction type"
+
+  join:
+    - left: source_a.transaction_id
+      right: source_b.transaction_id
+
+  rules:
+    - name: currency_aware_tolerance
+      severity: error
+      script: |
+        -- Different tolerance for different currencies
+        local tolerance = 0.01
+        if source_a.currency == "USD" then
+          tolerance = 0.01
+        elseif source_a.currency == "EUR" then
+          tolerance = 0.02
+        else
+          tolerance = 0.10  -- Higher tolerance for other currencies
+        end
+
+        return math.abs(source_a.amount - source_b.amount) <= tolerance
+
+---
+# ============================================================================
+# Lua Script Rules - Multi-Condition Validation
+# ============================================================================
+matching_rules:
+  name: lua_multi_condition
+  version: 1
+  description: "Multiple validation checks in one rule"
+
+  join:
+    - left: source_a.transaction_id
+      right: source_b.transaction_id
+
+  rules:
+    - name: comprehensive_validation
+      severity: error
+      script: |
+        -- Check 1: Amount must match within tolerance
+        if math.abs(source_a.amount - source_b.amount) > 0.05 then
+          return false
+        end
+
+        -- Check 2: Currency must match
+        if source_a.currency ~= source_b.currency then
+          return false
+        end
+
+        -- Check 3: Settlement must be after transaction (T+0 to T+3)
+        local days = days_between(source_a.transaction_date, source_b.settlement_date)
+        if days < 0 or days > 3 then
+          return false
+        end
+
+        return true
+
+---
+# ============================================================================
+# Complete Example - Payment Gateway Reconciliation
+# ============================================================================
+matching_rules:
+  name: payment_gateway_reconciliation_rules
+  version: 1
+  description: "Complete ruleset for payment gateway reconciliation"
+
+  # Metadata
+  created_at: 2024-01-15T10:00:00Z
+  created_by: john.doe@company.com
+  updated_at: 2024-03-01T14:30:00Z
+  updated_by: jane.smith@company.com
+
+  # Changelog
+  changelog:
+    - version: 1
+      date: 2024-01-15
+      changes: "Initial ruleset with simplified format"
+      author: john.doe@company.com
+
+  # Join on transaction ID
+  join:
+    - left: source_a.transaction_id
+      right: source_b.transaction_ref
+
+  # Rules execute in declaration order
+  rules:
+    # Basic field matches
+    - name: currency_match
+      severity: error
+      description: "Currency must match exactly"
+      left: source_a.currency
+      operator: "="
+      right: source_b.currency
+
+    # Amount tolerance using Lua
+    - name: amount_tolerance
+      severity: error
+      description: "Amount must match within $0.05"
+      script: |
+        -- Gateway may have rounding differences
+        return math.abs(source_a.amount - source_b.gross_amount) <= 0.05
+
+    # Fee validation using Lua
+    - name: fee_validation
+      severity: warning
+      description: "Validate expected fee calculation"
+      script: |
+        -- Expected fee: 2.9% + $0.30
+        local expected_fee = source_b.gross_amount * 0.029 + 0.30
+        local actual_fee = source_b.fee_amount or 0
+        local diff = math.abs(expected_fee - actual_fee)
+
+        if diff > 0.05 then
+          return false
+        end
+        return true
+
+    # Timestamp window using Lua
+    - name: timestamp_window
+      severity: warning
+      description: "Timestamps should be within 10 minutes"
+      script: |
+        local diff = timestamp_diff(source_a.created_at, source_b.transaction_time)
+        return math.abs(diff) <= 600  -- 600 seconds = 10 minutes
+
+---
+# ============================================================================
+# Real-World Example - Card Network Reconciliation
+# ============================================================================
+matching_rules:
+  name: card_network_reconciliation_rules
+  version: 1
+  description: "Match acquiring bank transactions with card network settlement"
+
+  join:
+    - left: source_a.arn
+      right: source_b.acquirer_reference_number
+
+  rules:
+    # Amount match with interchange fees
+    - name: settlement_amount_with_fees
+      severity: error
+      script: |
+        -- Settlement = Transaction - Interchange - Scheme Fee
+        local expected_settlement = source_a.transaction_amount -
+                                   source_a.interchange_fee -
+                                   source_a.scheme_fee
+        return math.abs(expected_settlement - source_b.settlement_amount) <= 0.02
+
+    # Status validation
+    - name: settlement_status
+      severity: error
+      operator: AND
+      operands:
+        - left: source_a.status
+          operator: "="
+          right: "CLEARED"
+        - left: source_b.settlement_status
+          operator: "="
+          right: "SETTLED"
+
+    # Settlement date window
+    - name: settlement_date_window
+      severity: warning
+      script: |
+        -- Settlement typically T+1 or T+2
+        local days = days_between(source_a.transaction_date, source_b.settlement_date)
+        return days >= 1 and days <= 2
+
+---
+# ============================================================================
+# Optimization Hints (Optional)
+# ============================================================================
+matching_rules:
+  name: optimized_rules
+  version: 1
+  description: "Rules with optimization hints"
+
+  # Optional optimization configuration
+  optimization:
+    early_termination: true  # Stop on first error-severity failure
+    index_fields:
+      - source_a.transaction_id
+      - source_b.transaction_id
+
+  join:
+    - left: source_a.transaction_id
+      right: source_b.transaction_id
+
+  rules:
+    - name: critical_check
+      severity: error
+      left: source_a.status
+      operator: "="
+      right: "VALID"
+
+---
+# ============================================================================
+# Severity Levels Example
+# ============================================================================
+matching_rules:
+  name: severity_example
+  version: 1
+  description: "Different severity levels for different rules"
+
+  join:
+    - left: source_a.id
+      right: source_b.id
+
+  rules:
+    # error - must match for reconciliation to succeed
+    - name: critical_amount
+      severity: error
+      left: source_a.amount
+      operator: "="
+      right: source_b.amount
+
+    # warning - allow mismatch but flag it
+    - name: timestamp_check
+      severity: warning
+      script: |
+        local diff = timestamp_diff(source_a.time, source_b.time)
+        return math.abs(diff) <= 3600  -- 1 hour
+
+    # info - informational only
+    - name: fee_info
+      severity: info
+      left: source_b.fee
+      operator: ">"
+      right: 0.00
+
+---
+# ============================================================================
+# Version Management Example
+# ============================================================================
+matching_rules:
+  name: evolving_rules
+  version: 3
+  description: "Rules that have evolved over time"
+
+  # Version metadata
+  created_at: 2024-01-15T10:00:00Z
+  created_by: john.doe@company.com
+  updated_at: 2024-03-01T14:30:00Z
+  updated_by: jane.smith@company.com
+
+  # Changelog
+  changelog:
+    - version: 3
+      date: 2024-03-01
+      changes: "Increased amount tolerance from $0.01 to $0.05 in Lua script"
+      author: jane.smith@company.com
+      reason: "Gateway rounding observed in production"
+
+    - version: 2
+      date: 2024-02-01
+      changes: "Converted time window to Lua script"
+      author: john.doe@company.com
+
+    - version: 1
+      date: 2024-01-15
+      changes: "Initial ruleset"
+      author: john.doe@company.com
+
+  join:
+    - left: source_a.transaction_id
+      right: source_b.transaction_id
+
+  rules:
+    - name: amount_tolerance
+      severity: error
+      script: |
+        return math.abs(source_a.amount - source_b.amount) <= 0.05  -- Changed from 0.01 in v3

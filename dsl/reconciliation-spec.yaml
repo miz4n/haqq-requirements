@@ -1,0 +1,717 @@
+# Reconciliation Job DSL Specification
+# Version: 2.0
+# This file defines the YAML schema for reconciliation job configurations
+# Based on requirements/06-reconciliation-modes.md, 07-results-and-queryability.md, 08-stages-and-workflows.md
+#
+# IMPORTANT: Reconciliation Unit Concept
+# - interval: Preconfigured in the reconciliation definition (how to subdivide dateTimeRange)
+# - dateTimeRange: Passed at runtime when executing the job (start inclusive, end exclusive)
+#
+# Example execution:
+#   reconciliation-cli run \
+#     --config daily_payment_reconciliation \
+#     --start 2024-03-01T00:00:00Z \
+#     --end 2024-04-01T00:00:00Z  # Exclusive end (includes all of March)
+#
+# System behavior:
+#   - Takes dateTimeRange [2024-03-01, 2024-04-01) - note: end is exclusive
+#   - Uses preconfigured interval (day)
+#   - Processes each day: Mar 1, Mar 2, ..., Mar 31 (NOT April 1)
+#   - Generates template variables for each: {year}=2024, {month}=03, {day}=01...31
+
+---
+# ============================================================================
+# Basic One-to-One Reconciliation
+# ============================================================================
+reconciliation:
+  # Required: Unique reconciliation name
+  name: daily_payment_reconciliation
+
+  # Required: Version
+  version: 1
+
+  # Optional: Description
+  description: "Daily reconciliation of internal ledger vs payment gateway"
+
+  # Required: Reconciliation mode (only one_to_one supported currently)
+  mode: one_to_one
+
+  # Required: Reconciliation unit configuration (preconfigured)
+  reconciliation_unit:
+    interval: day  # How to subdivide dateTimeRange: day, hour, minute
+    timezone: UTC  # Only UTC supported
+
+  # Required: Source A configuration
+  source_a:
+    # Reference to datasource
+    datasource: internal_ledger
+
+    # Reference to schema mapping
+    schema: ledger_schema
+
+  # Required: Source B configuration
+  source_b:
+    datasource: payment_gateway
+    schema: gateway_schema
+
+  # Required: Matching rules reference
+  matching_rules: payment_matching_rules
+
+  # Optional: Execution configuration
+  execution:
+    parallel_fetch: true
+    timeout_seconds: 600
+
+  # Optional: Output configuration (CSV only)
+  outputs:
+    matched:
+      store: true
+      export:
+        format: csv
+        path: /results/{run_id}/matched.csv
+    unmatched_left:
+      store: true
+      export:
+        format: csv
+        path: /results/{run_id}/unmatched_ledger.csv
+    unmatched_right:
+      store: true
+      export:
+        format: csv
+        path: /results/{run_id}/unmatched_gateway.csv
+
+  # Optional: Metadata
+  metadata:
+    owner: finance_team@company.com
+    created_at: 2024-01-15T10:00:00Z
+    updated_at: 2024-03-01T14:30:00Z
+
+---
+# ============================================================================
+# One-to-One with Output Queries (Match Groups)
+# ============================================================================
+reconciliation:
+  name: payment_recon_with_queries
+  version: 1
+  description: "Reconciliation with named output queries for match groups"
+
+  mode: one_to_one
+
+  reconciliation_unit:
+    interval: day
+    timezone: UTC
+
+  source_a:
+    datasource: internal_ledger
+    schema: ledger_schema
+
+  source_b:
+    datasource: payment_gateway
+    schema: gateway_schema
+
+  matching_rules: payment_matching_rules
+
+  # Outputs with named queries (for use in workflows)
+  outputs:
+    matched:
+      store: true
+      export:
+        format: csv
+        path: /results/{run_id}/matched.csv
+      # Define named queries for match groups
+      queries:
+        - name: perfect_matches
+          rules_passed: [currency_match, amount_tolerance, timestamp_window]
+
+        - name: timestamp_warnings
+          rules_passed: [currency_match, amount_tolerance]
+          rules_failed: [timestamp_window]
+
+        - name: amount_warnings
+          rules_passed: [currency_match, timestamp_window]
+          rules_failed: [amount_tolerance]
+
+    unmatched_left:
+      store: true
+      export:
+        format: csv
+        path: /results/{run_id}/unmatched_left.csv
+
+    unmatched_right:
+      store: true
+      export:
+        format: csv
+        path: /results/{run_id}/unmatched_right.csv
+
+---
+# ============================================================================
+# Multi-Stage Reconciliation Workflow
+# ============================================================================
+workflow:
+  name: three_way_payment_reconciliation
+  version: 1
+  description: "Three-way recon: Ledger vs Gateway vs Bank"
+
+  reconciliation_unit:
+    interval: day
+    timezone: UTC
+
+  # Execution mode
+  execution_mode: sequential  # or 'parallel'
+
+  # Error handling
+  error_handling:
+    on_stage_failure: stop  # or 'continue', 'skip_dependents'
+    notify:
+      - finops@company.com
+    retry:
+      max_attempts: 3
+      backoff: exponential
+
+  # Stages
+  stages:
+    # Stage 1: Ledger vs Gateway
+    - name: ledger_vs_gateway
+      dependencies: []
+
+      inputs:
+        source_a:
+          type: datasource
+          datasource: internal_ledger
+          schema: ledger_schema
+        source_b:
+          type: datasource
+          datasource: payment_gateway
+          schema: gateway_schema
+
+      processing:
+        mode: one_to_one
+        matching_rules: ledger_gateway_rules
+
+      outputs:
+        matched:
+          storage:
+            type: csv
+            path: /results/{run_id}/stage1_matched.csv
+          queries:
+            - name: high_confidence
+              rules_passed: [transaction_id, amount, currency]
+            - name: warnings
+              rules_failed: [timestamp]
+        unmatched_left:
+          storage:
+            type: csv
+            path: /results/{run_id}/stage1_unmatched_ledger.csv
+        unmatched_right:
+          storage:
+            type: csv
+            path: /results/{run_id}/stage1_unmatched_gateway.csv
+
+    # Stage 2: Gateway vs Bank
+    - name: gateway_vs_bank
+      dependencies: []
+
+      inputs:
+        source_a:
+          type: datasource
+          datasource: payment_gateway
+          schema: gateway_schema
+        source_b:
+          type: datasource
+          datasource: bank_statement
+          schema: bank_schema
+
+      processing:
+        mode: one_to_one
+        matching_rules: gateway_bank_rules
+
+      outputs:
+        matched:
+          storage:
+            type: csv
+            path: /results/{run_id}/stage2_matched.csv
+        unmatched_left:
+          storage:
+            type: csv
+            path: /results/{run_id}/stage2_unmatched_gateway.csv
+        unmatched_right:
+          storage:
+            type: csv
+            path: /results/{run_id}/stage2_unmatched_bank.csv
+
+    # Stage 3: Consolidation - references queries from previous stages
+    - name: three_way_consolidation
+      dependencies:
+        - ledger_vs_gateway
+        - gateway_vs_bank
+
+      inputs:
+        source_a:
+          type: stage_output
+          stage: ledger_vs_gateway
+          output_category: matched
+          query: high_confidence  # Reference named query
+        source_b:
+          type: stage_output
+          stage: gateway_vs_bank
+          output_category: matched
+
+      processing:
+        mode: one_to_one
+        matching_rules: consolidation_rules
+
+      outputs:
+        matched:
+          name: three_way_matched
+          storage:
+            type: csv
+            path: /results/{run_id}/three_way_matched.csv
+
+  # Final workflow outputs (CSV only)
+  final_outputs:
+    - name: complete_match
+      stage: three_way_consolidation
+      category: matched
+      export:
+        format: csv
+        filename: three_way_matched_{date}.csv
+
+    - name: exceptions
+      type: aggregated
+      sources:
+        - stage: ledger_vs_gateway
+          category: unmatched_left
+        - stage: three_way_consolidation
+          category: unmatched_left
+      export:
+        format: csv
+        filename: exceptions_{date}.csv
+
+---
+# ============================================================================
+# Workflow with Match Group Routing
+# ============================================================================
+workflow:
+  name: tiered_reconciliation
+  version: 1
+  description: "Route records by match groups to different stages"
+
+  reconciliation_unit:
+    interval: day
+    timezone: UTC
+
+  execution_mode: parallel
+
+  stages:
+    # Stage 1: Strict matching
+    - name: strict_matching
+      inputs:
+        source_a:
+          type: datasource
+          datasource: internal_ledger
+          schema: ledger_schema
+        source_b:
+          type: datasource
+          datasource: payment_gateway
+          schema: gateway_schema
+
+      processing:
+        mode: one_to_one
+        matching_rules: strict_rules
+
+      outputs:
+        matched:
+          storage:
+            type: csv
+            path: /results/{run_id}/strict_matched.csv
+          # Define queries for different match groups
+          queries:
+            - name: perfect_matches
+              rules_passed: [amount_exact, currency_match, timestamp_exact]
+
+            - name: timestamp_warnings
+              rules_passed: [amount_exact, currency_match]
+              rules_failed: [timestamp_exact]
+
+            - name: amount_warnings
+              rules_passed: [currency_match, timestamp_exact]
+              rules_failed: [amount_exact]
+
+        unmatched_left:
+          storage:
+            type: csv
+            path: /results/{run_id}/strict_unmatched_left.csv
+        unmatched_right:
+          storage:
+            type: csv
+            path: /results/{run_id}/strict_unmatched_right.csv
+
+    # Stage 2: Process timestamp warnings
+    - name: timestamp_analysis
+      dependencies: [strict_matching]
+
+      inputs:
+        source_a:
+          type: stage_output
+          stage: strict_matching
+          output_category: matched
+          query: timestamp_warnings  # Reference specific match group
+
+      processing:
+        mode: one_to_one
+        matching_rules: timestamp_relaxed_rules
+
+      outputs:
+        matched:
+          storage:
+            type: csv
+            path: /results/{run_id}/timestamp_resolved.csv
+
+    # Stage 3: Process amount warnings
+    - name: amount_analysis
+      dependencies: [strict_matching]
+
+      inputs:
+        source_a:
+          type: stage_output
+          stage: strict_matching
+          output_category: matched
+          query: amount_warnings  # Reference different match group
+
+      processing:
+        mode: one_to_one
+        matching_rules: amount_tolerance_rules
+
+      outputs:
+        matched:
+          storage:
+            type: csv
+            path: /results/{run_id}/amount_resolved.csv
+
+---
+# ============================================================================
+# Scheduled Reconciliation
+# ============================================================================
+reconciliation:
+  name: scheduled_daily_recon
+  version: 1
+
+  # Schedule configuration
+  schedule:
+    enabled: true
+    cron: "0 9 * * *"  # Daily at 9 AM
+    timezone: America/New_York
+
+    # Auto-generate reconciliation unit
+    reconciliation_unit: yesterday  # or 'today', 'last_month', etc.
+
+    # Retry configuration
+    retry_on_failure:
+      enabled: true
+      max_attempts: 3
+      retry_delay: 3600  # 1 hour
+
+  # Standard reconciliation config
+  mode: one_to_one
+
+  reconciliation_unit:
+    interval: day
+    timezone: UTC
+
+  source_a:
+    datasource: internal_ledger
+    schema: ledger_schema
+  source_b:
+    datasource: payment_gateway
+    schema: gateway_schema
+
+  matching_rules: payment_rules
+
+  outputs:
+    matched:
+      export:
+        format: csv
+        path: /results/{run_id}/matched.csv
+    unmatched_left:
+      export:
+        format: csv
+        path: /results/{run_id}/unmatched_left.csv
+    unmatched_right:
+      export:
+        format: csv
+        path: /results/{run_id}/unmatched_right.csv
+
+  # Notifications
+  notifications:
+    on_completion:
+      - type: email
+        recipients:
+          - finance_team@company.com
+        template: reconciliation_complete
+    on_failure:
+      - type: email
+        recipients:
+          - ops_team@company.com
+        template: reconciliation_failed
+        severity: critical
+    on_low_match_rate:
+      threshold: 0.95
+      recipients:
+        - finance_controller@company.com
+
+---
+# ============================================================================
+# Reconciliation with Duplicate Handling
+# ============================================================================
+reconciliation:
+  name: recon_with_duplicate_handling
+  version: 1
+
+  mode: one_to_one
+
+  reconciliation_unit:
+    interval: day
+    timezone: UTC
+
+  source_a:
+    datasource: internal_ledger
+    schema: ledger_schema
+  source_b:
+    datasource: payment_gateway
+    schema: gateway_schema
+
+  matching_rules: payment_rules
+
+  # Duplicate handling configuration
+  duplicate_handling:
+    check_duplicates: true
+    duplicate_keys:
+      source_a: [transaction_id]
+      source_b: [transaction_ref]
+    action: error  # or 'warning', 'take_first', 'take_last'
+    report_duplicates: true
+
+  outputs:
+    matched:
+      export:
+        format: csv
+        path: /results/{run_id}/matched.csv
+    unmatched_left:
+      export:
+        format: csv
+        path: /results/{run_id}/unmatched_left.csv
+    unmatched_right:
+      export:
+        format: csv
+        path: /results/{run_id}/unmatched_right.csv
+
+---
+# ============================================================================
+# Reconciliation with Data Quality Checks
+# ============================================================================
+reconciliation:
+  name: recon_with_quality_checks
+  version: 1
+
+  mode: one_to_one
+
+  reconciliation_unit:
+    interval: day
+    timezone: UTC
+
+  source_a:
+    datasource: internal_ledger
+    schema: ledger_schema
+
+    # Pre-reconciliation data quality checks
+    data_quality:
+      enabled: true
+      rules:
+        - type: not_null
+          columns: [transaction_id, amount]
+        - type: unique
+          columns: [transaction_id]
+        - type: range
+          column: amount
+          min: 0
+          max: 1000000
+        - type: regex
+          column: transaction_id
+          pattern: "^TXN[0-9]{6}$"
+        - type: enum
+          column: status
+          allowed_values: [COMPLETED, PENDING, FAILED]
+
+      # Fail if more than 5% of records are invalid
+      failure_threshold: 0.05
+      action: fail  # or 'warn', 'exclude_invalid'
+
+  source_b:
+    datasource: payment_gateway
+    schema: gateway_schema
+
+  matching_rules: payment_rules
+
+  outputs:
+    matched:
+      export:
+        format: csv
+        path: /results/{run_id}/matched.csv
+    unmatched_left:
+      export:
+        format: csv
+        path: /results/{run_id}/unmatched_left.csv
+    unmatched_right:
+      export:
+        format: csv
+        path: /results/{run_id}/unmatched_right.csv
+
+---
+# ============================================================================
+# Complete Production Reconciliation Example
+# ============================================================================
+reconciliation:
+  name: production_payment_reconciliation
+  version: 3
+  description: |
+    Daily reconciliation of internal payment ledger against
+    payment gateway settlement reports.
+
+    Business Owner: Finance Operations Team
+    SLA: Complete by 10 AM daily
+    On-Call: finops-oncall@company.com
+
+  # Metadata
+  created_at: 2024-01-15T10:00:00Z
+  created_by: john.doe@company.com
+  updated_at: 2024-03-01T14:30:00Z
+  updated_by: jane.smith@company.com
+
+  # Changelog
+  changelog:
+    - version: 3
+      date: 2024-03-01
+      changes: "Updated to CSV-only exports and simplified rules format"
+      author: jane.smith@company.com
+    - version: 2
+      date: 2024-02-01
+      changes: "Added scheduled execution and notifications"
+      author: john.doe@company.com
+    - version: 1
+      date: 2024-01-15
+      changes: "Initial reconciliation configuration"
+      author: john.doe@company.com
+
+  # Reconciliation configuration
+  mode: one_to_one
+
+  reconciliation_unit:
+    interval: day
+    timezone: UTC
+
+  # Scheduling
+  schedule:
+    enabled: true
+    cron: "0 9 * * *"  # Daily at 9 AM UTC
+    timezone: UTC
+    reconciliation_unit: yesterday
+
+  # Source configurations
+  source_a:
+    datasource: internal_ledger:2
+    schema: ledger_schema:1
+
+    # Data quality checks
+    data_quality:
+      enabled: true
+      rules:
+        - type: not_null
+          columns: [transaction_id, amount, currency]
+        - type: unique
+          columns: [transaction_id]
+      failure_threshold: 0.01
+
+  source_b:
+    datasource: payment_gateway:1
+    schema: gateway_schema:1
+
+  # Matching rules
+  matching_rules: payment_matching_rules:2
+
+  # Duplicate handling
+  duplicate_handling:
+    check_duplicates: true
+    action: error
+
+  # Execution
+  execution:
+    parallel_fetch: true
+    timeout_seconds: 600
+
+  # Outputs (CSV only)
+  outputs:
+    matched:
+      store: true
+      export:
+        format: csv
+        path: /reconciliation/results/{run_id}/matched.csv
+      # Named queries for match groups
+      queries:
+        - name: perfect_matches
+          rules_passed: [currency_match, amount_tolerance, timestamp_window]
+        - name: warnings
+          rules_passed_any: [timestamp_window, fee_validation]
+    unmatched_left:
+      store: true
+      export:
+        format: csv
+        path: /reconciliation/results/{run_id}/unmatched_ledger.csv
+    unmatched_right:
+      store: true
+      export:
+        format: csv
+        path: /reconciliation/results/{run_id}/unmatched_gateway.csv
+
+  # Notifications
+  notifications:
+    on_completion:
+      - type: email
+        recipients: [finance_team@company.com]
+        template: reconciliation_complete
+    on_failure:
+      - type: email
+        recipients: [ops_team@company.com, finops-oncall@company.com]
+        template: reconciliation_failed
+        severity: critical
+    on_low_match_rate:
+      threshold: 0.95
+      recipients: [finance_controller@company.com]
+
+  # Retention policy
+  retention:
+    results_retention_days: 730  # 2 years
+    audit_log_retention_days: 2555  # 7 years
+
+  # Permissions
+  permissions:
+    owner: john.doe@company.com
+    editors:
+      - finance_team@company.com
+    viewers:
+      - audit_team@company.com
+
+---
+# ============================================================================
+# TODO: One-to-Many Reconciliation (Future)
+# ============================================================================
+# One-to-many reconciliation mode will be implemented in a future version.
+# This will support:
+# - Merchant settlement vs individual transactions
+# - Invoice reconciliation with multiple line items
+# - Order fulfillment with multiple shipments
+#
+# Example structure (not yet implemented):
+# reconciliation:
+#   name: merchant_settlement_reconciliation
+#   mode: one_to_many  # NOT YET SUPPORTED
+#   ...
