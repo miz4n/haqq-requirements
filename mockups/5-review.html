@@ -149,274 +149,67 @@
     // Load complete configuration
     const config = Storage.get();
 
-    // Render summary cards
+    // Render summary - overview cards + detailed stage segments
     function renderSummary() {
       const container = document.getElementById('summary-container');
-      let html = '<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: var(--spacing-lg);">';
+      let html = '';
+
+      // ===== CONFIGURATION OVERVIEW (Grid of cards) =====
+      html += '<h3 style="margin-bottom: var(--spacing-md); color: var(--gray-700);">Configuration Overview</h3>';
+      html += '<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: var(--spacing-md); margin-bottom: var(--spacing-xl);">';
 
       // Reconciliation Unit
       if (config.reconUnit) {
         html += `
           <div class="card card-compact">
-            <div class="card-header" style="background: var(--primary); color: white;">
-              <h4 class="card-title" style="margin: 0;">Reconciliation Unit</h4>
+            <div class="card-header" style="background: var(--primary); color: white; padding: var(--spacing-sm) var(--spacing-md);">
+              <h4 class="card-title" style="margin: 0; font-size: 0.9rem;">Reconciliation Unit</h4>
             </div>
-            <div class="card-body">
-              <div style="margin-bottom: var(--spacing-sm);">
-                <strong>Interval:</strong> ${config.reconUnit.interval}
-              </div>
-              <div>
-                <strong>Timezone:</strong> ${config.reconUnit.timezone}
-              </div>
-              <div class="mt-2">
-                <a href="1-recon-unit.html" class="btn btn-outline btn-sm">Edit</a>
-              </div>
+            <div class="card-body" style="padding: var(--spacing-md);">
+              <div style="font-size: 0.85rem; margin-bottom: var(--spacing-xs);"><strong>Interval:</strong> ${config.reconUnit.interval}</div>
+              <div style="font-size: 0.85rem;"><strong>Timezone:</strong> ${config.reconUnit.timezone}</div>
+              <div class="mt-2"><a href="1-recon-unit.html" class="btn btn-outline btn-sm" style="font-size: 0.75rem; padding: 4px 8px;">Edit</a></div>
             </div>
           </div>
         `;
       }
 
-      // Data Sources - support both new format (dataSources array) and old format (sourceA/sourceB)
+      // Data Sources
       const colors = ['var(--success)', 'var(--warning)', '#8b5cf6', '#06b6d4'];
       if (config.dataSources && config.dataSources.length > 0) {
-        // New format: dataSources array
         config.dataSources.forEach((source, index) => {
           html += `
             <div class="card card-compact">
-              <div class="card-header" style="background: ${colors[index % colors.length]}; color: white;">
-                <h4 class="card-title" style="margin: 0;">${escapeHtml(source.name)}</h4>
+              <div class="card-header" style="background: ${colors[index % colors.length]}; color: white; padding: var(--spacing-sm) var(--spacing-md);">
+                <h4 class="card-title" style="margin: 0; font-size: 0.9rem;">${escapeHtml(source.name)}</h4>
               </div>
-              <div class="card-body">
-                <div style="margin-bottom: var(--spacing-sm);">
-                  <strong>Type:</strong> ${(source.type || 'unknown').toUpperCase()}
-                </div>
-                ${source.type === 'postgresql' ? `
-                  <div style="margin-bottom: var(--spacing-sm);">
-                    <strong>Database:</strong> ${escapeHtml(source.database || '')}
-                  </div>
-                ` : source.type === 'api' ? `
-                  <div style="margin-bottom: var(--spacing-sm);">
-                    <strong>Base URL:</strong> ${escapeHtml(source.baseUrl || '')}
-                  </div>
-                ` : `
-                  <div style="margin-bottom: var(--spacing-sm);">
-                    <strong>Host:</strong> ${escapeHtml(source.host || '')}
-                  </div>
-                `}
-                <div class="mt-2">
-                  <a href="2-datasources.html" class="btn btn-outline btn-sm">Edit</a>
-                </div>
+              <div class="card-body" style="padding: var(--spacing-md);">
+                <div style="font-size: 0.85rem;"><strong>Type:</strong> ${(source.type || 'unknown').toUpperCase()}</div>
+                <div class="mt-2"><a href="2-datasources.html" class="btn btn-outline btn-sm" style="font-size: 0.75rem; padding: 4px 8px;">Edit</a></div>
               </div>
             </div>
           `;
         });
-      } else {
-        // Old format: sourceA/sourceB
-        if (config.sourceA) {
-          const source = config.sourceA;
-          html += `
-            <div class="card card-compact">
-              <div class="card-header" style="background: var(--success); color: white;">
-                <h4 class="card-title" style="margin: 0;">Source A: ${escapeHtml(source.name)}</h4>
-              </div>
-              <div class="card-body">
-                <div style="margin-bottom: var(--spacing-sm);">
-                  <strong>Type:</strong> ${source.type.toUpperCase()}
-                </div>
-                ${source.type === 'postgresql' ? `
-                  <div style="margin-bottom: var(--spacing-sm);">
-                    <strong>Database:</strong> ${escapeHtml(source.database)}
-                  </div>
-                ` : source.type === 'api' ? `
-                  <div style="margin-bottom: var(--spacing-sm);">
-                    <strong>Base URL:</strong> ${escapeHtml(source.baseUrl)}
-                  </div>
-                ` : `
-                  <div style="margin-bottom: var(--spacing-sm);">
-                    <strong>Host:</strong> ${escapeHtml(source.host)}
-                  </div>
-                `}
-                <div class="mt-2">
-                  <a href="2-datasources.html" class="btn btn-outline btn-sm">Edit</a>
-                </div>
-              </div>
-            </div>
-          `;
-        }
-
-        if (config.sourceB) {
-          const source = config.sourceB;
-          html += `
-            <div class="card card-compact">
-              <div class="card-header" style="background: var(--warning); color: white;">
-                <h4 class="card-title" style="margin: 0;">Source B: ${escapeHtml(source.name)}</h4>
-              </div>
-              <div class="card-body">
-                <div style="margin-bottom: var(--spacing-sm);">
-                  <strong>Type:</strong> ${source.type.toUpperCase()}
-                </div>
-                ${source.type === 'postgresql' ? `
-                  <div style="margin-bottom: var(--spacing-sm);">
-                    <strong>Database:</strong> ${escapeHtml(source.database)}
-                  </div>
-                ` : source.type === 'api' ? `
-                  <div style="margin-bottom: var(--spacing-sm);">
-                    <strong>Base URL:</strong> ${escapeHtml(source.baseUrl)}
-                  </div>
-                ` : `
-                  <div style="margin-bottom: var(--spacing-sm);">
-                    <strong>Host:</strong> ${escapeHtml(source.host)}
-                  </div>
-                `}
-                <div class="mt-2">
-                  <a href="2-datasources.html" class="btn btn-outline btn-sm">Edit</a>
-                </div>
-              </div>
-            </div>
-          `;
-        }
       }
 
-      // Schemas - support both new format (schemas array) and old format (schemaA/schemaB)
+      // Schemas
       if (config.schemas && config.schemas.length > 0) {
-        // New format: schemas array
         config.schemas.forEach((schema, index) => {
           if (schema.fields && schema.fields.length > 0) {
-            const transformCount = schema.fields.filter(f => f.transform).length;
             const sourceName = config.dataSources?.[index]?.name || `Source ${index + 1}`;
             html += `
               <div class="card card-compact">
-                <div class="card-header" style="background: var(--gray-700); color: white;">
-                  <h4 class="card-title" style="margin: 0;">${escapeHtml(sourceName)} Schema</h4>
+                <div class="card-header" style="background: var(--gray-600); color: white; padding: var(--spacing-sm) var(--spacing-md);">
+                  <h4 class="card-title" style="margin: 0; font-size: 0.9rem;">${escapeHtml(sourceName)} Schema</h4>
                 </div>
-                <div class="card-body">
-                  <div style="margin-bottom: var(--spacing-sm);">
-                    <strong>Fields:</strong> ${schema.fields.length}
-                  </div>
-                  <div style="margin-bottom: var(--spacing-sm);">
-                    <strong>Transformations:</strong> ${transformCount}
-                  </div>
-                  <div class="mt-2">
-                    <a href="3-schema.html" class="btn btn-outline btn-sm">Edit</a>
-                  </div>
+                <div class="card-body" style="padding: var(--spacing-md);">
+                  <div style="font-size: 0.85rem;"><strong>Fields:</strong> ${schema.fields.length}</div>
+                  <div class="mt-2"><a href="3-schema.html" class="btn btn-outline btn-sm" style="font-size: 0.75rem; padding: 4px 8px;">Edit</a></div>
                 </div>
               </div>
             `;
           }
         });
-      } else {
-        // Old format: schemaA/schemaB
-        if (config.schemaA && config.schemaA.fields) {
-          const schema = config.schemaA;
-          const transformCount = schema.fields.filter(f => f.transform).length;
-          html += `
-            <div class="card card-compact">
-              <div class="card-header" style="background: var(--gray-700); color: white;">
-                <h4 class="card-title" style="margin: 0;">Schema A</h4>
-              </div>
-              <div class="card-body">
-                <div style="margin-bottom: var(--spacing-sm);">
-                  <strong>Fields:</strong> ${schema.fields.length}
-                </div>
-                <div style="margin-bottom: var(--spacing-sm);">
-                  <strong>Transformations:</strong> ${transformCount}
-                </div>
-                <div class="mt-2">
-                  <a href="3-schema.html" class="btn btn-outline btn-sm">Edit</a>
-                </div>
-              </div>
-            </div>
-          `;
-        }
-
-        if (config.schemaB && config.schemaB.fields) {
-          const schema = config.schemaB;
-          const transformCount = schema.fields.filter(f => f.transform).length;
-          html += `
-            <div class="card card-compact">
-              <div class="card-header" style="background: var(--gray-700); color: white;">
-                <h4 class="card-title" style="margin: 0;">Schema B</h4>
-              </div>
-              <div class="card-body">
-                <div style="margin-bottom: var(--spacing-sm);">
-                  <strong>Fields:</strong> ${schema.fields.length}
-                </div>
-                <div style="margin-bottom: var(--spacing-sm);">
-                  <strong>Transformations:</strong> ${transformCount}
-                </div>
-                <div class="mt-2">
-                  <a href="3-schema.html" class="btn btn-outline btn-sm">Edit</a>
-                </div>
-              </div>
-            </div>
-          `;
-        }
-      }
-
-      // Stages (new format)
-      if (config.stages && config.stages.length > 0) {
-        config.stages.forEach((stage, index) => {
-          const rulesCount = stage.rules?.length || 0;
-          const errorRules = stage.rules?.filter(r => r.severity === 'error').length || 0;
-          const warningRules = stage.rules?.filter(r => r.severity === 'warning').length || 0;
-          html += `
-            <div class="card card-compact">
-              <div class="card-header" style="background: #8b5cf6; color: white;">
-                <h4 class="card-title" style="margin: 0;">Stage ${index + 1}: ${escapeHtml(stage.name)}</h4>
-              </div>
-              <div class="card-body">
-                <div style="margin-bottom: var(--spacing-sm);">
-                  <strong>Mode:</strong> ${stage.mode.replace(/_/g, ' ')}
-                </div>
-                <div style="margin-bottom: var(--spacing-sm);">
-                  <strong>JOIN Conditions:</strong> ${stage.joinConditions?.length || 0}
-                </div>
-                <div style="margin-bottom: var(--spacing-sm);">
-                  <strong>Matching Rules:</strong> ${rulesCount > 0 ? rulesCount : 'None (JOIN only)'}
-                  ${rulesCount > 0 ? `
-                    <span style="font-size: 0.8rem; margin-left: 0.5rem;">
-                      (${errorRules} error${errorRules !== 1 ? 's' : ''}, ${warningRules} warning${warningRules !== 1 ? 's' : ''})
-                    </span>
-                  ` : ''}
-                </div>
-                <div style="margin-bottom: var(--spacing-sm);">
-                  <strong>Result Queries:</strong> ${stage.resultQueries?.length || 0}
-                </div>
-                <div class="mt-2">
-                  <a href="4-stages.html" class="btn btn-outline btn-sm">Edit</a>
-                </div>
-              </div>
-            </div>
-          `;
-        });
-      }
-      // Legacy format - Matching Rules
-      else if (config.matchingRules) {
-        const rules = config.matchingRules;
-        const errorRules = rules.rules?.filter(r => r.severity === 'error').length || 0;
-        const warningRules = rules.rules?.filter(r => r.severity === 'warning').length || 0;
-        html += `
-          <div class="card card-compact">
-            <div class="card-header" style="background: var(--error); color: white;">
-              <h4 class="card-title" style="margin: 0;">Matching Rules</h4>
-            </div>
-            <div class="card-body">
-              <div style="margin-bottom: var(--spacing-sm);">
-                <strong>JOIN Conditions:</strong> ${rules.join?.length || 0}
-              </div>
-              <div style="margin-bottom: var(--spacing-sm);">
-                <strong>Validation Rules:</strong> ${rules.rules?.length || 0}
-              </div>
-              <div style="margin-bottom: var(--spacing-sm);">
-                <span class="badge badge-error">${errorRules} Errors</span>
-                <span class="badge badge-warning">${warningRules} Warnings</span>
-              </div>
-              <div class="mt-2">
-                <a href="4-stages.html" class="btn btn-outline btn-sm">Edit</a>
-              </div>
-            </div>
-          </div>
-        `;
       }
 
       // Job Configuration
@@ -424,31 +217,161 @@
       if (jobConfig) {
         html += `
           <div class="card card-compact">
-            <div class="card-header" style="background: var(--primary); color: white;">
-              <h4 class="card-title" style="margin: 0;">Job Configuration</h4>
+            <div class="card-header" style="background: var(--gray-800); color: white; padding: var(--spacing-sm) var(--spacing-md);">
+              <h4 class="card-title" style="margin: 0; font-size: 0.9rem;">Job: ${escapeHtml(jobConfig.name) || '(unnamed)'}</h4>
             </div>
-            <div class="card-body">
-              <div style="margin-bottom: var(--spacing-sm);">
-                <strong>Job Name:</strong> ${escapeHtml(jobConfig.name) || '(not set)'}
-              </div>
-              <div style="margin-bottom: var(--spacing-sm);">
-                <strong>Scheduled:</strong> ${jobConfig.schedule ? 'Yes' : 'No'}
-              </div>
-              ${jobConfig.schedule ? `
-                <div style="margin-bottom: var(--spacing-sm);">
-                  <strong>Cron:</strong> ${jobConfig.schedule.cron}
-                </div>
-              ` : ''}
-              <div class="mt-2">
-                <a href="4-stages.html" class="btn btn-outline btn-sm">Edit</a>
-              </div>
+            <div class="card-body" style="padding: var(--spacing-md);">
+              <div style="font-size: 0.85rem;"><strong>Scheduled:</strong> ${jobConfig.schedule ? jobConfig.schedule.cron : 'No'}</div>
+              <div class="mt-2"><a href="4-stages.html" class="btn btn-outline btn-sm" style="font-size: 0.75rem; padding: 4px 8px;">Edit</a></div>
             </div>
           </div>
         `;
       }
 
       html += '</div>';
+
+      // ===== STAGES DETAIL (Full-width segments) =====
+      if (config.stages && config.stages.length > 0) {
+        html += '<h3 style="margin-bottom: var(--spacing-md); color: var(--gray-700);">Reconciliation Stages</h3>';
+        config.stages.forEach((stage, index) => {
+          html += renderStageSegment(stage, index);
+        });
+      }
+
       container.innerHTML = html;
+    }
+
+    // Render a detailed stage segment
+    function renderStageSegment(stage, index) {
+      const rulesCount = stage.rules?.length || 0;
+      const errorRules = stage.rules?.filter(r => r.severity === 'error').length || 0;
+      const warningRules = stage.rules?.filter(r => r.severity === 'warning').length || 0;
+
+      // Get datasource names
+      const getSourceName = (dsConfig) => {
+        if (!dsConfig) return 'Unknown';
+        if (dsConfig.type === 'datasource') {
+          const ds = config.dataSources?.find(d => d.id === dsConfig.datasourceId);
+          return ds?.name || dsConfig.datasourceId || 'Unknown';
+        } else if (dsConfig.type === 'stage_output') {
+          const srcStage = config.stages?.find(s => s.id === dsConfig.stageId);
+          return `${srcStage?.name || 'Stage'} → ${dsConfig.outputQuery || 'output'}`;
+        }
+        return 'Unknown';
+      };
+
+      let html = `
+        <div style="border: 1px solid var(--gray-200); border-radius: var(--radius-lg); margin-bottom: var(--spacing-lg); overflow: hidden; background: white;">
+          <!-- Stage Header -->
+          <div style="background: linear-gradient(135deg, #8b5cf6, #7c3aed); color: white; padding: var(--spacing-md) var(--spacing-lg); display: flex; justify-content: space-between; align-items: center;">
+            <div>
+              <h4 style="margin: 0; font-size: 1.1rem;">Stage ${index + 1}: ${escapeHtml(stage.name)}</h4>
+              <span style="font-size: 0.85rem; opacity: 0.9;">Mode: ${stage.mode.replace(/_/g, ' ')}</span>
+            </div>
+            <a href="4-stages.html" class="btn btn-outline btn-sm" style="background: rgba(255,255,255,0.15); border-color: rgba(255,255,255,0.3); color: white;">Edit Stage</a>
+          </div>
+
+          <!-- Stage Body -->
+          <div style="padding: var(--spacing-lg);">
+            <!-- Data Sources Row -->
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: var(--spacing-lg); margin-bottom: var(--spacing-lg);">
+              <div style="background: var(--gray-50); padding: var(--spacing-md); border-radius: var(--radius-md);">
+                <div style="font-size: 0.75rem; text-transform: uppercase; color: var(--gray-500); margin-bottom: var(--spacing-xs);">Left Source</div>
+                <div style="font-weight: 600; color: var(--gray-800);">${escapeHtml(getSourceName(stage.datasourceLeft))}</div>
+              </div>
+              <div style="background: var(--gray-50); padding: var(--spacing-md); border-radius: var(--radius-md);">
+                <div style="font-size: 0.75rem; text-transform: uppercase; color: var(--gray-500); margin-bottom: var(--spacing-xs);">Right Source</div>
+                <div style="font-weight: 600; color: var(--gray-800);">${escapeHtml(getSourceName(stage.datasourceRight))}</div>
+              </div>
+            </div>
+
+            <!-- JOIN Conditions -->
+            <div style="margin-bottom: var(--spacing-lg);">
+              <div style="font-size: 0.85rem; font-weight: 600; color: var(--gray-700); margin-bottom: var(--spacing-sm);">JOIN Conditions</div>
+              <div style="background: var(--gray-50); padding: var(--spacing-md); border-radius: var(--radius-md);">
+                ${(stage.joinConditions || []).filter(j => j.leftField && j.rightField).map(join => `
+                  <div style="font-family: monospace; font-size: 0.85rem; color: var(--gray-700); padding: var(--spacing-xs) 0;">
+                    <span style="color: var(--success);">${escapeHtml(join.leftField)}</span>
+                    <span style="color: var(--gray-400);"> = </span>
+                    <span style="color: var(--warning);">${escapeHtml(join.rightField)}</span>
+                  </div>
+                `).join('') || '<span style="color: var(--gray-400); font-size: 0.85rem;">No JOIN conditions defined</span>'}
+              </div>
+            </div>
+
+            <!-- Matching Rules -->
+            <div style="margin-bottom: var(--spacing-lg);">
+              <div style="font-size: 0.85rem; font-weight: 600; color: var(--gray-700); margin-bottom: var(--spacing-sm);">
+                Matching Rules
+                ${rulesCount > 0 ? `<span style="font-weight: normal; color: var(--gray-500);"> (${errorRules} error${errorRules !== 1 ? 's' : ''}, ${warningRules} warning${warningRules !== 1 ? 's' : ''})</span>` : ''}
+              </div>
+              ${rulesCount > 0 ? `
+                <div style="display: flex; flex-direction: column; gap: var(--spacing-sm);">
+                  ${stage.rules.map(rule => `
+                    <div style="background: ${rule.severity === 'error' ? '#fef2f2' : '#fffbeb'}; border-left: 3px solid ${rule.severity === 'error' ? 'var(--error)' : 'var(--warning)'}; padding: var(--spacing-sm) var(--spacing-md); border-radius: 0 var(--radius-sm) var(--radius-sm) 0;">
+                      <div style="display: flex; align-items: center; gap: var(--spacing-sm);">
+                        <span style="font-weight: 600; color: var(--gray-800);">${escapeHtml(rule.name)}</span>
+                        <span style="font-size: 0.7rem; padding: 2px 6px; border-radius: 3px; background: ${rule.severity === 'error' ? 'var(--error)' : 'var(--warning)'}; color: white;">${rule.severity}</span>
+                      </div>
+                      ${rule.description ? `<div style="font-size: 0.8rem; color: var(--gray-600); margin-top: 2px;">${escapeHtml(rule.description)}</div>` : ''}
+                    </div>
+                  `).join('')}
+                </div>
+              ` : `
+                <div style="background: var(--gray-50); padding: var(--spacing-md); border-radius: var(--radius-md); color: var(--gray-500); font-size: 0.85rem;">
+                  No matching rules defined. Records will be matched based on JOIN conditions only.
+                </div>
+              `}
+            </div>
+
+            <!-- Result Queries -->
+            ${(stage.resultQueries && stage.resultQueries.length > 0) ? `
+              <div style="margin-bottom: var(--spacing-lg);">
+                <div style="font-size: 0.85rem; font-weight: 600; color: var(--gray-700); margin-bottom: var(--spacing-sm);">Result Queries (${stage.resultQueries.length})</div>
+                <div style="display: flex; flex-direction: column; gap: var(--spacing-sm);">
+                  ${stage.resultQueries.map(query => `
+                    <div style="background: #f0f9ff; border: 1px solid #bae6fd; padding: var(--spacing-sm) var(--spacing-md); border-radius: var(--radius-sm);">
+                      <div style="font-weight: 600; color: var(--gray-800);">${escapeHtml(query.name)}</div>
+                      ${query.description ? `<div style="font-size: 0.8rem; color: var(--gray-600);">${escapeHtml(query.description)}</div>` : ''}
+                      ${(query.rulesPassed?.length > 0 || query.rulesFailed?.length > 0) ? `
+                        <div style="font-size: 0.75rem; margin-top: var(--spacing-xs); color: var(--gray-500);">
+                          ${query.rulesPassed?.length > 0 ? `<span style="color: var(--success);">PASS: ${query.rulesPassed.join(', ')}</span>` : ''}
+                          ${query.rulesPassed?.length > 0 && query.rulesFailed?.length > 0 ? ' | ' : ''}
+                          ${query.rulesFailed?.length > 0 ? `<span style="color: var(--error);">FAIL: ${query.rulesFailed.join(', ')}</span>` : ''}
+                        </div>
+                      ` : ''}
+                    </div>
+                  `).join('')}
+                </div>
+              </div>
+            ` : ''}
+
+            <!-- Outputs -->
+            <div>
+              <div style="font-size: 0.85rem; font-weight: 600; color: var(--gray-700); margin-bottom: var(--spacing-sm);">Output Paths</div>
+              <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: var(--spacing-sm);">
+                ${stage.outputs?.matched?.enabled !== false ? `
+                  <div style="font-family: monospace; font-size: 0.75rem; color: var(--gray-600); background: var(--gray-50); padding: var(--spacing-xs) var(--spacing-sm); border-radius: var(--radius-sm);">
+                    <strong>matched:</strong> ${escapeHtml(stage.outputs?.matched?.path || 'N/A')}
+                  </div>
+                ` : ''}
+                ${stage.outputs?.unmatchedLeft?.enabled !== false ? `
+                  <div style="font-family: monospace; font-size: 0.75rem; color: var(--gray-600); background: var(--gray-50); padding: var(--spacing-xs) var(--spacing-sm); border-radius: var(--radius-sm);">
+                    <strong>unmatched_left:</strong> ${escapeHtml(stage.outputs?.unmatchedLeft?.path || 'N/A')}
+                  </div>
+                ` : ''}
+                ${stage.outputs?.unmatchedRight?.enabled !== false ? `
+                  <div style="font-family: monospace; font-size: 0.75rem; color: var(--gray-600); background: var(--gray-50); padding: var(--spacing-xs) var(--spacing-sm); border-radius: var(--radius-sm);">
+                    <strong>unmatched_right:</strong> ${escapeHtml(stage.outputs?.unmatchedRight?.path || 'N/A')}
+                  </div>
+                ` : ''}
+              </div>
+            </div>
+          </div>
+        </div>
+      `;
+
+      return html;
     }
 
     // Generate and display YAML
