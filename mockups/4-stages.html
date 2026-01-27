@@ -1,0 +1,301 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Step 4: Stages & Rules - Reconciliation Engine</title>
+  <link rel="stylesheet" href="css/main.css">
+  <link rel="stylesheet" href="css/components.css">
+  <link rel="stylesheet" href="css/steps.css">
+  <link rel="stylesheet" href="css/blocks.css">
+</head>
+<body class="step-page">
+  <!-- Header -->
+  <header class="site-header">
+    <div class="container">
+      <div class="header-content">
+        <div class="logo">
+          <div class="logo-icon">R</div>
+          <span>Reconciliation Engine</span>
+        </div>
+        <nav>
+          <ul class="main-nav">
+            <li><a href="index.html" class="active">Create</a></li>
+            <li><a href="#">Jobs</a></li>
+            <li><a href="#">Results</a></li>
+            <li><a href="#">Settings</a></li>
+          </ul>
+        </nav>
+      </div>
+    </div>
+  </header>
+
+  <!-- Progress Stepper -->
+  <div class="container mt-3">
+    <div class="progress-stepper">
+      <div class="stepper-container">
+        <div class="step completed">
+          <div class="step-number">1</div>
+          <div class="step-label">Recon Unit</div>
+        </div>
+        <div class="step completed">
+          <div class="step-number">2</div>
+          <div class="step-label">Data Sources</div>
+        </div>
+        <div class="step completed">
+          <div class="step-number">3</div>
+          <div class="step-label">Schema</div>
+        </div>
+        <div class="step active">
+          <div class="step-number">4</div>
+          <div class="step-label">Stages & Rules</div>
+        </div>
+        <div class="step">
+          <div class="step-number">5</div>
+          <div class="step-label">Review</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Main Content -->
+  <main class="main-content">
+    <div class="container-wide">
+      <!-- Job Configuration Card -->
+      <div class="card mb-4">
+        <div class="card-header">
+          <h2 class="card-title">Job Configuration</h2>
+          <p class="card-subtitle">Configure the reconciliation job settings</p>
+        </div>
+        <div class="card-body">
+          <div class="grid grid-2">
+            <div class="form-group">
+              <label class="form-label form-label-required">Job Name</label>
+              <input type="text" class="form-control" id="job-name" placeholder="daily_payment_reconciliation">
+              <span class="form-help">Unique identifier for this reconciliation job</span>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Description</label>
+              <input type="text" class="form-control" id="job-description" placeholder="Daily reconciliation of payment transactions">
+            </div>
+          </div>
+
+          <!-- Schedule (Optional) -->
+          <div class="form-group mt-3">
+            <label class="checkbox">
+              <input type="checkbox" id="schedule-enabled">
+              <span>Enable Scheduled Execution</span>
+            </label>
+          </div>
+
+          <div id="schedule-config" style="display: none;" class="mt-3">
+            <div class="card" style="background: var(--gray-50); border: 1px solid var(--gray-200);">
+              <div class="card-body">
+                <div class="grid grid-2">
+                  <div class="form-group">
+                    <label class="form-label">Cron Expression</label>
+                    <input type="text" class="form-control" id="schedule-cron" placeholder="0 2 * * *">
+                    <span class="form-help">e.g., 0 2 * * * (daily at 2 AM)</span>
+                  </div>
+                  <div class="form-group">
+                    <label class="form-label">Auto-generate Date Range</label>
+                    <select class="form-control" id="schedule-range">
+                      <option value="previous_day">Previous Day</option>
+                      <option value="previous_hour">Previous Hour</option>
+                      <option value="previous_week">Previous Week</option>
+                      <option value="previous_month">Previous Month</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Stages Card -->
+      <div class="card">
+        <div class="card-header">
+          <h2 class="card-title">Reconciliation Stages</h2>
+          <p class="card-subtitle">Define multi-stage reconciliation workflow with matching rules</p>
+        </div>
+        <div class="card-body" style="padding: 0;">
+          <!-- Stage Tabs -->
+          <div class="stage-tabs" id="stage-tabs">
+            <!-- Rendered by StagesManager -->
+          </div>
+
+          <!-- Stage Content -->
+          <div id="stage-content">
+            <!-- Rendered by StagesManager -->
+          </div>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <!-- Action Bar -->
+  <div class="action-bar">
+    <div class="container">
+      <div class="action-bar-content">
+        <button class="btn btn-secondary" id="backBtn">
+          ← Back
+        </button>
+        <div style="display: flex; gap: var(--spacing-md);">
+          <button class="btn btn-outline" id="saveDraftBtn">
+            Save Draft
+          </button>
+          <button class="btn btn-primary" id="nextBtn">
+            Next: Review →
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Scripts -->
+  <script src="js/storage.js"></script>
+  <script src="js/block-rule-engine.js"></script>
+  <script src="js/block-drag-drop.js"></script>
+  <script src="js/stages-manager.js"></script>
+  <script src="js/yaml-generator.js"></script>
+  <script src="js/app.js"></script>
+  <script>
+    // Initialize stages manager
+    const stagesManager = new StagesManager({
+      containerId: 'stage-content',
+      tabsId: 'stage-tabs',
+      onStateChange: (state) => {
+        Storage.update('stages', state.stages);
+        Storage.update('job', state.job);
+      }
+    });
+
+    // Load existing config
+    const config = Storage.get();
+
+    // Check if previous steps are complete
+    // Support both new format (schemas array) and old format (schemaA/schemaB)
+    const hasSchemas = (config.schemas && config.schemas.length >= 2 &&
+                        config.schemas[0].fields && config.schemas[0].fields.length > 0) ||
+                       (config.schemaA && config.schemaA.fields && config.schemaA.fields.length > 0);
+
+    if (!hasSchemas) {
+      document.querySelector('.card-body').innerHTML = `
+        <div class="alert alert-warning" style="margin: var(--spacing-lg);">
+          <div class="alert-title">Schema Not Configured</div>
+          Please complete Step 3 (Schema Configuration) before configuring stages and rules.
+          <div class="mt-3">
+            <a href="3-schema.html" class="btn btn-primary">Go to Schema Configuration</a>
+          </div>
+        </div>
+      `;
+    } else {
+      // Initialize with config
+      stagesManager.initialize(config);
+
+      // Load job config into form
+      const jobConfig = config.job || config.reconciliation || {};
+      document.getElementById('job-name').value = jobConfig.name || '';
+      document.getElementById('job-description').value = jobConfig.description || '';
+
+      if (jobConfig.schedule) {
+        document.getElementById('schedule-enabled').checked = true;
+        document.getElementById('schedule-config').style.display = 'block';
+        document.getElementById('schedule-cron').value = jobConfig.schedule.cron || '';
+        document.getElementById('schedule-range').value = jobConfig.schedule.autoRange || 'previous_day';
+      }
+
+      // Auto-generate job name if empty
+      if (!jobConfig.name && config.sourceA && config.sourceB) {
+        document.getElementById('job-name').value = `${config.sourceA.name}_${config.sourceB.name}_reconciliation`;
+      }
+    }
+
+    // Schedule toggle
+    document.getElementById('schedule-enabled')?.addEventListener('change', function() {
+      document.getElementById('schedule-config').style.display = this.checked ? 'block' : 'none';
+    });
+
+    // Job config change handlers
+    document.getElementById('job-name')?.addEventListener('change', function() {
+      stagesManager.jobConfig.name = this.value;
+      stagesManager.saveState();
+    });
+
+    document.getElementById('job-description')?.addEventListener('change', function() {
+      stagesManager.jobConfig.description = this.value;
+      stagesManager.saveState();
+    });
+
+    document.getElementById('schedule-cron')?.addEventListener('change', function() {
+      if (!stagesManager.jobConfig.schedule) {
+        stagesManager.jobConfig.schedule = {};
+      }
+      stagesManager.jobConfig.schedule.cron = this.value;
+      stagesManager.saveState();
+    });
+
+    document.getElementById('schedule-range')?.addEventListener('change', function() {
+      if (!stagesManager.jobConfig.schedule) {
+        stagesManager.jobConfig.schedule = {};
+      }
+      stagesManager.jobConfig.schedule.autoRange = this.value;
+      stagesManager.saveState();
+    });
+
+    document.getElementById('schedule-enabled')?.addEventListener('change', function() {
+      if (!this.checked) {
+        stagesManager.jobConfig.schedule = null;
+      } else {
+        stagesManager.jobConfig.schedule = {
+          cron: document.getElementById('schedule-cron').value || '',
+          autoRange: document.getElementById('schedule-range').value || 'previous_day'
+        };
+      }
+      stagesManager.saveState();
+    });
+
+    // Validation
+    App.validateCurrentStep = function() {
+      const jobName = document.getElementById('job-name')?.value;
+
+      if (!jobName || jobName.trim() === '') {
+        App.showNotification('Please provide a job name', 'error');
+        return false;
+      }
+
+      // Validate schedule if enabled
+      if (document.getElementById('schedule-enabled')?.checked) {
+        const cron = document.getElementById('schedule-cron')?.value;
+        if (!cron || cron.trim() === '') {
+          App.showNotification('Please provide a cron expression for the schedule', 'error');
+          return false;
+        }
+      }
+
+      // Validate stages
+      const errors = stagesManager.validate();
+      if (errors.length > 0) {
+        App.showNotification(errors[0], 'error');
+        return false;
+      }
+
+      // Save final state
+      const finalConfig = stagesManager.getConfiguration();
+      Storage.update('stages', finalConfig.stages);
+      Storage.update('job', finalConfig.job);
+
+      // Also save in old format for backward compatibility
+      Storage.update('reconciliation', {
+        name: finalConfig.job.name,
+        description: finalConfig.job.description,
+        schedule: finalConfig.job.schedule
+      });
+
+      App.showNotification('Stages and rules saved successfully!', 'success');
+      return true;
+    };
+  </script>
+</body>
+</html>

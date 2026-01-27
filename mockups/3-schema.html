@@ -1,0 +1,493 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Step 3: Schema Configuration - Reconciliation Engine</title>
+  <link rel="stylesheet" href="css/main.css">
+  <link rel="stylesheet" href="css/components.css">
+  <link rel="stylesheet" href="css/steps.css">
+</head>
+<body class="step-page">
+  <!-- Header -->
+  <header class="site-header">
+    <div class="container">
+      <div class="header-content">
+        <div class="logo">
+          <div class="logo-icon">R</div>
+          <span>Reconciliation Engine</span>
+        </div>
+        <nav>
+          <ul class="main-nav">
+            <li><a href="index.html" class="active">Create</a></li>
+            <li><a href="#">Jobs</a></li>
+            <li><a href="#">Results</a></li>
+            <li><a href="#">Settings</a></li>
+          </ul>
+        </nav>
+      </div>
+    </div>
+  </header>
+
+  <!-- Progress Stepper (5 Steps) -->
+  <div class="container mt-3">
+    <div class="progress-stepper">
+      <div class="stepper-container">
+        <div class="step completed">
+          <div class="step-number">1</div>
+          <div class="step-label">Recon Unit</div>
+        </div>
+        <div class="step completed">
+          <div class="step-number">2</div>
+          <div class="step-label">Data Sources</div>
+        </div>
+        <div class="step active">
+          <div class="step-number">3</div>
+          <div class="step-label">Schema</div>
+        </div>
+        <div class="step">
+          <div class="step-number">4</div>
+          <div class="step-label">Stages & Rules</div>
+        </div>
+        <div class="step">
+          <div class="step-number">5</div>
+          <div class="step-label">Review</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Main Content -->
+  <main class="main-content">
+    <div class="container-wide">
+      <div class="card">
+        <div class="card-header">
+          <h2 class="card-title">Configure Data Schemas</h2>
+          <p class="card-subtitle">Auto-detect schemas and add transformations for each data source</p>
+        </div>
+        <div class="card-body">
+          <div class="alert alert-info mb-4">
+            <div class="alert-title">Schema Auto-Detection</div>
+            Click "Fetch Sample Data" to automatically detect field types from your data sources. You can then modify field names, types, and add Lua transformations.
+          </div>
+
+          <!-- Tabs -->
+          <div class="tabs" id="schema-tabs">
+            <!-- Tabs will be rendered dynamically -->
+          </div>
+
+          <!-- Tab Contents -->
+          <div id="tab-contents">
+            <!-- Tab content will be rendered dynamically -->
+          </div>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <!-- Action Bar -->
+  <div class="action-bar">
+    <div class="container">
+      <div class="action-bar-content">
+        <button class="btn btn-secondary" id="backBtn">
+          ← Back
+        </button>
+        <div style="display: flex; gap: var(--spacing-md);">
+          <button class="btn btn-outline" id="saveDraftBtn">
+            Save Draft
+          </button>
+          <button class="btn btn-primary" id="nextBtn">
+            Next: Matching Rules →
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Scripts -->
+  <script src="js/storage.js"></script>
+  <script src="js/schema-detector.js"></script>
+  <script src="js/yaml-generator.js"></script>
+  <script src="js/app.js"></script>
+  <script>
+    // State
+    let dataSources = [];
+    let schemas = [];
+    let currentTabIndex = 0;
+
+    // Load saved state
+    const config = Storage.get();
+
+    // Load data sources
+    if (!config.dataSources || config.dataSources.length < 2) {
+      document.querySelector('.card-body').innerHTML = `
+        <div class="alert alert-warning">
+          <div class="alert-title">Data Sources Not Configured</div>
+          Please complete Step 2 (Data Sources) before configuring schemas.
+          <div class="mt-3">
+            <a href="2-datasources.html" class="btn btn-primary">Go to Data Sources</a>
+          </div>
+        </div>
+      `;
+    } else {
+      dataSources = config.dataSources;
+
+      // Load or initialize schemas
+      if (config.schemas && config.schemas.length > 0) {
+        schemas = config.schemas;
+      } else {
+        // Initialize schemas array matching data sources
+        schemas = dataSources.map(ds => ({
+          id: Storage.generateId('schema'),
+          dataSourceId: ds.id,
+          name: `${ds.name}_schema`,
+          description: '',
+          version: 1,
+          fields: [],
+          sampleData: null
+        }));
+      }
+
+      // Render UI
+      renderTabs();
+      renderTabContent();
+    }
+
+    // Render tabs
+    function renderTabs() {
+      const tabsContainer = document.getElementById('schema-tabs');
+      let html = '';
+
+      dataSources.forEach((source, index) => {
+        const isActive = index === currentTabIndex ? 'active' : '';
+        html += `
+          <button class="tab ${isActive}" onclick="switchTab(${index})">
+            ${source.name} Schema
+          </button>
+        `;
+      });
+
+      tabsContainer.innerHTML = html;
+    }
+
+    // Render tab content
+    function renderTabContent() {
+      const container = document.getElementById('tab-contents');
+      const source = dataSources[currentTabIndex];
+      const schema = schemas[currentTabIndex];
+
+      let html = `
+        <div class="tab-content active">
+          <div class="mb-3" style="display: flex; justify-content: space-between; align-items: center;">
+            <div>
+              <input type="text" class="form-control" id="schema-${schema.id}-name"
+                value="${schema.name}" placeholder="Schema name"
+                style="width: 300px; display: inline-block; margin-right: 1rem;">
+              <input type="text" class="form-control" id="schema-${schema.id}-description"
+                value="${schema.description || ''}" placeholder="Description (optional)"
+                style="width: 400px; display: inline-block;">
+            </div>
+            <button class="btn btn-primary" onclick="fetchSampleData(${currentTabIndex})">
+              🔍 Fetch Sample Data
+            </button>
+          </div>
+
+          <!-- Sample Data Preview -->
+          <div id="schema-${schema.id}-sample" class="mb-3" style="${schema.sampleData ? '' : 'display: none;'}">
+            <h4>Sample Data Preview</h4>
+            <div class="table-container">
+              <table id="schema-${schema.id}-sample-table">
+                ${renderSampleDataTable(schema.sampleData)}
+              </table>
+            </div>
+          </div>
+
+          <!-- Schema Table -->
+          <div id="schema-${schema.id}-schema-container">
+            ${renderSchemaTable(schema)}
+          </div>
+
+          <button class="btn btn-secondary btn-sm mt-3" onclick="addDerivedField(${currentTabIndex})">
+            + Add Derived Field
+          </button>
+        </div>
+      `;
+
+      container.innerHTML = html;
+    }
+
+    // Render sample data table
+    function renderSampleDataTable(sampleData) {
+      if (!sampleData || sampleData.length === 0) {
+        return '';
+      }
+
+      const columns = Object.keys(sampleData[0]);
+      let html = '<thead><tr>';
+      columns.forEach(col => {
+        html += `<th>${col}</th>`;
+      });
+      html += '</tr></thead><tbody>';
+
+      sampleData.forEach(row => {
+        html += '<tr>';
+        columns.forEach(col => {
+          const value = row[col] !== null && row[col] !== undefined ? row[col] : '';
+          html += `<td>${value}</td>`;
+        });
+        html += '</tr>';
+      });
+      html += '</tbody>';
+
+      return html;
+    }
+
+    // Render schema table
+    function renderSchemaTable(schema) {
+      if (!schema.fields || schema.fields.length === 0) {
+        return '<p class="text-gray">Click "Fetch Sample Data" to auto-detect schema</p>';
+      }
+
+      let html = `
+        <h4 class="mt-4 mb-3">Schema Fields (${schema.fields.length})</h4>
+        <div class="schema-table-container">
+          <table class="schema-table">
+            <thead>
+              <tr>
+                <th style="width: 150px;">Source Field</th>
+                <th style="width: 150px;">Target Field</th>
+                <th style="width: 120px;">Type</th>
+                <th style="width: 80px;">Required</th>
+                <th style="width: 250px;">Transform (Lua)</th>
+                <th style="width: 150px;">Sample</th>
+                <th style="width: 80px;">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+      `;
+
+      schema.fields.forEach((field, fieldIndex) => {
+        const sampleValue = schema.sampleData && schema.sampleData[0]
+          ? schema.sampleData[0][field.source || field.name]
+          : '';
+
+        html += `
+          <tr>
+            <td>
+              <code style="font-size: 0.75rem;">${field.source || field.name}</code>
+            </td>
+            <td>
+              <input type="text" class="field-name-input"
+                value="${field.name}"
+                onchange="updateFieldName(${currentTabIndex}, ${fieldIndex}, this.value)">
+            </td>
+            <td>
+              <select class="field-type-select"
+                onchange="updateFieldType(${currentTabIndex}, ${fieldIndex}, this.value)">
+                <option value="string" ${field.type === 'string' ? 'selected' : ''}>String</option>
+                <option value="decimal" ${field.type === 'decimal' ? 'selected' : ''}>Decimal</option>
+                <option value="integer" ${field.type === 'integer' ? 'selected' : ''}>Integer</option>
+                <option value="date" ${field.type === 'date' ? 'selected' : ''}>Date</option>
+                <option value="timestamp" ${field.type === 'timestamp' ? 'selected' : ''}>Timestamp</option>
+                <option value="boolean" ${field.type === 'boolean' ? 'selected' : ''}>Boolean</option>
+              </select>
+            </td>
+            <td style="text-align: center;">
+              <input type="checkbox" ${field.required ? 'checked' : ''}
+                onchange="updateFieldRequired(${currentTabIndex}, ${fieldIndex}, this.checked)">
+            </td>
+            <td>
+              <textarea class="transform-input" rows="2" placeholder="tonumber(value)"
+                onchange="updateFieldTransform(${currentTabIndex}, ${fieldIndex}, this.value)">${field.transform || ''}</textarea>
+            </td>
+            <td>
+              <div class="sample-data" title="${sampleValue}">${sampleValue}</div>
+            </td>
+            <td>
+              <div class="field-actions">
+                <button class="icon-btn danger" onclick="deleteField(${currentTabIndex}, ${fieldIndex})" title="Delete field">
+                  ×
+                </button>
+              </div>
+            </td>
+          </tr>
+        `;
+      });
+
+      html += `
+            </tbody>
+          </table>
+        </div>
+      `;
+
+      return html;
+    }
+
+    // Switch tabs
+    function switchTab(index) {
+      currentTabIndex = index;
+      renderTabs();
+      renderTabContent();
+    }
+
+    // Fetch sample data and auto-detect schema
+    function fetchSampleData(index) {
+      const source = dataSources[index];
+      const schema = schemas[index];
+
+      if (!source) {
+        App.showNotification('Data source not found', 'error');
+        return;
+      }
+
+      App.showNotification('Fetching sample data...', 'info');
+
+      setTimeout(() => {
+        // Get sample data based on source type
+        let sourceType = source.type === 'postgresql' ? 'postgresql' :
+                        source.type === 'api' ? 'api' : 'sftp-csv';
+
+        const sampleData = SchemaDetector.getSampleData(sourceType);
+
+        // Auto-detect schema
+        const detectedSchema = SchemaDetector.detectSchema(sampleData, source.name);
+
+        // Update schema with detected fields and sample data
+        schemas[index].fields = detectedSchema.fields;
+        schemas[index].sampleData = sampleData;
+        schemas[index].name = document.getElementById(`schema-${schema.id}-name`)?.value || detectedSchema.name;
+        schemas[index].description = document.getElementById(`schema-${schema.id}-description`)?.value || '';
+
+        // Re-render
+        renderTabContent();
+
+        App.showNotification('Schema auto-detected successfully!', 'success');
+      }, 1000);
+    }
+
+    // Update field name
+    function updateFieldName(schemaIndex, fieldIndex, value) {
+      schemas[schemaIndex].fields[fieldIndex].name = value;
+    }
+
+    // Update field type
+    function updateFieldType(schemaIndex, fieldIndex, value) {
+      schemas[schemaIndex].fields[fieldIndex].type = value;
+
+      // Set precision/scale for decimal
+      if (value === 'decimal') {
+        schemas[schemaIndex].fields[fieldIndex].precision = 19;
+        schemas[schemaIndex].fields[fieldIndex].scale = 4;
+      }
+    }
+
+    // Update field required
+    function updateFieldRequired(schemaIndex, fieldIndex, value) {
+      schemas[schemaIndex].fields[fieldIndex].required = value;
+    }
+
+    // Update field transform
+    function updateFieldTransform(schemaIndex, fieldIndex, value) {
+      schemas[schemaIndex].fields[fieldIndex].transform = value || null;
+    }
+
+    // Delete field
+    function deleteField(schemaIndex, fieldIndex) {
+      if (confirm('Are you sure you want to delete this field?')) {
+        schemas[schemaIndex].fields.splice(fieldIndex, 1);
+        renderTabContent();
+        App.showNotification('Field deleted', 'info');
+      }
+    }
+
+    // Add derived field
+    function addDerivedField(schemaIndex) {
+      const schema = schemas[schemaIndex];
+
+      if (!schema.fields || schema.fields.length === 0) {
+        App.showNotification('Please fetch sample data first', 'error');
+        return;
+      }
+
+      const newField = {
+        source: null,
+        name: 'derived_field',
+        type: 'string',
+        required: false,
+        transform: '-- Lua code here\\nreturn value'
+      };
+
+      schema.fields.push(newField);
+      renderTabContent();
+      App.showNotification('Derived field added', 'success');
+    }
+
+    // Collect schema data from form
+    function collectSchemaData(schema) {
+      return {
+        id: schema.id,
+        dataSourceId: schema.dataSourceId,
+        name: document.getElementById(`schema-${schema.id}-name`)?.value || schema.name,
+        description: document.getElementById(`schema-${schema.id}-description`)?.value || '',
+        version: schema.version,
+        fields: schema.fields,
+        sampleData: schema.sampleData
+      };
+    }
+
+    // Save all schemas
+    function saveSchemas() {
+      // Collect data from all schemas
+      const collectedSchemas = schemas.map(schema => collectSchemaData(schema));
+
+      // Validate
+      if (collectedSchemas.length !== dataSources.length) {
+        App.showNotification('Schema count mismatch with data sources', 'error');
+        return false;
+      }
+
+      // Check all schemas have names
+      for (let i = 0; i < collectedSchemas.length; i++) {
+        if (!collectedSchemas[i].name || collectedSchemas[i].name.trim() === '') {
+          App.showNotification(`Schema ${i + 1} must have a name`, 'error');
+          return false;
+        }
+      }
+
+      // Check for duplicate names
+      const names = collectedSchemas.map(s => s.name.toLowerCase());
+      const duplicates = names.filter((name, idx) => names.indexOf(name) !== idx);
+      if (duplicates.length > 0) {
+        App.showNotification(`Duplicate schema name: ${duplicates[0]}`, 'error');
+        return false;
+      }
+
+      // Check all schemas have fields
+      for (let i = 0; i < collectedSchemas.length; i++) {
+        if (!collectedSchemas[i].fields || collectedSchemas[i].fields.length === 0) {
+          const sourceName = dataSources[i].name;
+          App.showNotification(`Please configure schema for ${sourceName}`, 'error');
+          return false;
+        }
+      }
+
+      // Update schemas in memory
+      schemas = collectedSchemas;
+
+      // Save to storage
+      Storage.update('schemas', schemas);
+      return true;
+    }
+
+    // Validation
+    App.validateCurrentStep = function() {
+      if (!saveSchemas()) {
+        return false;
+      }
+
+      App.showNotification('Schemas saved successfully!', 'success');
+      return true;
+    };
+  </script>
+</body>
+</html>

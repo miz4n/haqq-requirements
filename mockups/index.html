@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Reconciliation Engine - Create Reconciliation</title>
+  <link rel="stylesheet" href="css/main.css">
+  <link rel="stylesheet" href="css/components.css">
+  <link rel="stylesheet" href="css/steps.css">
+</head>
+<body>
+  <!-- Header -->
+  <header class="site-header">
+    <div class="container">
+      <div class="header-content">
+        <div class="logo">
+          <div class="logo-icon">R</div>
+          <span>Reconciliation Engine</span>
+        </div>
+        <nav>
+          <ul class="main-nav">
+            <li><a href="#" class="active">Create</a></li>
+            <li><a href="#">Jobs</a></li>
+            <li><a href="#">Results</a></li>
+            <li><a href="#">Settings</a></li>
+          </ul>
+        </nav>
+      </div>
+    </div>
+  </header>
+
+  <!-- Main Content -->
+  <main class="main-content">
+    <div class="container">
+      <!-- Hero Section -->
+      <div class="card" style="text-align: center; padding: var(--spacing-2xl);">
+        <h1>Create New Reconciliation</h1>
+        <p class="text-lg text-gray mb-4">
+          Configure a new reconciliation job to match transactions across data sources
+        </p>
+
+        <div style="max-width: 800px; margin: 0 auto;">
+          <div class="alert alert-info">
+            <div class="alert-title">Configuration Wizard</div>
+            This wizard will guide you through 6 steps to create a complete reconciliation configuration:
+            <ol style="text-align: left; margin-top: 1rem; margin-left: 1.5rem;">
+              <li>Select reconciliation unit (day/hour/minute)</li>
+              <li>Define data sources (SFTP/API/PostgreSQL)</li>
+              <li>Configure schemas with auto-detection</li>
+              <li>Build matching rules</li>
+              <li>Setup multi-stage reconciliation</li>
+              <li>Review and export YAML configuration</li>
+            </ol>
+          </div>
+
+          <div class="mt-4">
+            <button class="btn btn-primary btn-lg" onclick="startNewConfig()">
+              Start New Configuration
+            </button>
+            <button class="btn btn-secondary btn-lg" onclick="continueConfig()">
+              Continue Saved Draft
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Recent Configurations -->
+      <div class="card mt-4">
+        <div class="card-header">
+          <h3 class="card-title">Quick Start Templates</h3>
+          <p class="card-subtitle">Start with a pre-configured template</p>
+        </div>
+        <div class="card-body">
+          <div class="grid grid-3">
+            <!-- Template 1 -->
+            <div class="card card-compact" style="cursor: pointer; border: 1px solid var(--gray-200);" onclick="loadTemplate('payment')">
+              <div class="card-header">
+                <div style="font-size: 2rem; text-align: center; margin-bottom: 0.5rem;">💳</div>
+                <h4 class="card-title text-center">Payment Gateway</h4>
+              </div>
+              <div class="card-body">
+                <p class="text-sm text-gray">
+                  Reconcile internal ledger vs payment gateway settlements
+                </p>
+                <div class="mt-2">
+                  <span class="badge badge-primary">API</span>
+                  <span class="badge badge-primary">PostgreSQL</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- Template 2 -->
+            <div class="card card-compact" style="cursor: pointer; border: 1px solid var(--gray-200);" onclick="loadTemplate('bank')">
+              <div class="card-header">
+                <div style="font-size: 2rem; text-align: center; margin-bottom: 0.5rem;">🏦</div>
+                <h4 class="card-title text-center">Bank Statement</h4>
+              </div>
+              <div class="card-body">
+                <p class="text-sm text-gray">
+                  Match cash ledger with bank statement CSV files
+                </p>
+                <div class="mt-2">
+                  <span class="badge badge-primary">SFTP</span>
+                  <span class="badge badge-primary">PostgreSQL</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- Template 3 -->
+            <div class="card card-compact" style="cursor: pointer; border: 1px solid var(--gray-200);" onclick="loadTemplate('settlement')">
+              <div class="card-header">
+                <div style="font-size: 2rem; text-align: center; margin-bottom: 0.5rem;">📊</div>
+                <h4 class="card-title text-center">Merchant Settlement</h4>
+              </div>
+              <div class="card-body">
+                <p class="text-sm text-gray">
+                  Reconcile aggregated settlements with transaction details
+                </p>
+                <div class="mt-2">
+                  <span class="badge badge-primary">SFTP</span>
+                  <span class="badge badge-primary">PostgreSQL</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Features -->
+      <div class="grid grid-3 mt-4">
+        <div class="card card-compact">
+          <div class="card-body text-center">
+            <div style="font-size: 2.5rem; margin-bottom: 1rem;">🤖</div>
+            <h4 class="font-semibold mb-2">Auto-Detection</h4>
+            <p class="text-sm text-gray">
+              Automatic schema detection from sample data with intelligent type inference
+            </p>
+          </div>
+        </div>
+
+        <div class="card card-compact">
+          <div class="card-body text-center">
+            <div style="font-size: 2.5rem; margin-bottom: 1rem;">⚡</div>
+            <h4 class="font-semibold mb-2">Lua Scripting</h4>
+            <p class="text-sm text-gray">
+              Powerful Lua transformations for complex business logic
+            </p>
+          </div>
+        </div>
+
+        <div class="card card-compact">
+          <div class="card-body text-center">
+            <div style="font-size: 2.5rem; margin-bottom: 1rem;">📝</div>
+            <h4 class="font-semibold mb-2">YAML Export</h4>
+            <p class="text-sm text-gray">
+              Generate production-ready YAML configurations automatically
+            </p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <!-- Footer -->
+  <footer class="site-footer">
+    <div class="container">
+      <div class="footer-content">
+        <p>&copy; 2024 Reconciliation Engine. All rights reserved.</p>
+      </div>
+    </div>
+  </footer>
+
+  <!-- Scripts -->
+  <script src="js/storage.js"></script>
+  <script src="js/app.js"></script>
+  <script>
+    function startNewConfig() {
+      // Clear any existing configuration
+      Storage.clear();
+      App.showNotification('Starting new configuration...', 'info');
+      setTimeout(() => {
+        window.location.href = '1-recon-unit.html';
+      }, 500);
+    }
+
+    function continueConfig() {
+      const config = Storage.get();
+      const completedSteps = Storage.getCompletedSteps();
+
+      if (completedSteps === 0) {
+        App.showNotification('No saved draft found. Starting new configuration...', 'warning');
+        setTimeout(() => {
+          window.location.href = '1-recon-unit.html';
+        }, 1000);
+        return;
+      }
+
+      // Navigate to next incomplete step
+      const pages = [
+        '1-recon-unit.html',
+        '2-datasources.html',
+        '3-schema.html',
+        '4-rules.html',
+        '5-reconciliation.html',
+        '6-review.html'
+      ];
+
+      window.location.href = pages[completedSteps] || '1-recon-unit.html';
+    }
+
+    function loadTemplate(templateName) {
+      App.showNotification(`Loading ${templateName} template...`, 'info');
+
+      // In a real implementation, this would load predefined template data
+      // For now, just start from step 1
+      Storage.clear();
+
+      setTimeout(() => {
+        window.location.href = '1-recon-unit.html';
+      }, 1000);
+    }
+  </script>
+</body>
+</html>

@@ -1,0 +1,1103 @@
+/* ============================================================================
+   Block Programming UI Styles
+   Visual block-based rule builder (Scratch/Blockly-inspired)
+   ============================================================================ */
+
+/* ============================================================================
+   Block Color Palette (CSS Variables)
+   ============================================================================ */
+:root {
+  /* Comparison Blocks - Blue family */
+  --block-comparison-bg: #3b82f6;
+  --block-comparison-border: #2563eb;
+  --block-comparison-shadow: rgba(59, 130, 246, 0.3);
+  --block-comparison-light: #dbeafe;
+
+  /* Boolean Blocks - Green family */
+  --block-boolean-bg: #10b981;
+  --block-boolean-border: #059669;
+  --block-boolean-shadow: rgba(16, 185, 129, 0.3);
+  --block-boolean-light: #d1fae5;
+
+  /* Function Blocks - Purple family */
+  --block-function-bg: #8b5cf6;
+  --block-function-border: #7c3aed;
+  --block-function-shadow: rgba(139, 92, 246, 0.3);
+  --block-function-light: #ede9fe;
+
+  /* Field Reference Blocks - Orange family */
+  --block-field-bg: #f97316;
+  --block-field-border: #ea580c;
+  --block-field-shadow: rgba(249, 115, 22, 0.3);
+  --block-field-light: #ffedd5;
+
+  /* Literal Value Blocks - Gray family */
+  --block-literal-bg: #6b7280;
+  --block-literal-border: #4b5563;
+  --block-literal-shadow: rgba(107, 114, 128, 0.3);
+  --block-literal-light: #f3f4f6;
+
+  /* Arithmetic Blocks - Cyan family */
+  --block-arithmetic-bg: #06b6d4;
+  --block-arithmetic-border: #0891b2;
+  --block-arithmetic-shadow: rgba(6, 182, 212, 0.3);
+  --block-arithmetic-light: #cffafe;
+
+  /* Block dimensions */
+  --block-min-height: 40px;
+  --block-padding-y: 8px;
+  --block-padding-x: 12px;
+  --block-border-radius: 8px;
+  --block-border-width: 2px;
+  --slot-min-width: 100px;
+  --slot-min-height: 36px;
+  --slot-padding: 4px 8px;
+}
+
+/* ============================================================================
+   Block Editor Container Layout
+   ============================================================================ */
+
+.block-editor-container {
+  display: flex;
+  height: 500px;
+  border: 1px solid var(--gray-200);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  background: white;
+}
+
+/* ============================================================================
+   Block Toolbox (Left Palette)
+   ============================================================================ */
+
+.block-toolbox {
+  width: 260px;
+  background: var(--gray-50);
+  border-right: 1px solid var(--gray-200);
+  overflow-y: auto;
+  flex-shrink: 0;
+}
+
+.block-toolbox-section {
+  padding: var(--spacing-md);
+  border-bottom: 1px solid var(--gray-200);
+}
+
+.block-toolbox-section:last-child {
+  border-bottom: none;
+}
+
+.block-toolbox-title {
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--gray-500);
+  margin-bottom: var(--spacing-sm);
+}
+
+.block-toolbox-items {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-xs);
+}
+
+.block-toolbox-item {
+  cursor: grab;
+  transition: transform 0.1s ease;
+}
+
+.block-toolbox-item:hover {
+  transform: translateX(2px);
+}
+
+.block-toolbox-item:active {
+  cursor: grabbing;
+}
+
+/* Toolbox block preview (smaller) */
+.block-toolbox-item .block {
+  font-size: 0.75rem;
+  padding: 6px 10px;
+  min-height: 32px;
+}
+
+.block-toolbox-item .block-slot {
+  min-width: 50px;
+  min-height: 24px;
+  font-size: 0.65rem;
+}
+
+/* ============================================================================
+   Block Canvas (Workspace)
+   ============================================================================ */
+
+.block-canvas-container {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  min-width: 0;
+}
+
+.block-canvas-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--spacing-sm) var(--spacing-md);
+  background: white;
+  border-bottom: 1px solid var(--gray-200);
+  gap: var(--spacing-md);
+}
+
+.block-canvas-toolbar-left {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+}
+
+.block-canvas-toolbar-right {
+  flex: 1;
+  min-width: 0;
+}
+
+.expression-preview {
+  background: var(--gray-100);
+  border-radius: var(--radius-sm);
+  padding: var(--spacing-xs) var(--spacing-sm);
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  color: var(--gray-700);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+
+.block-canvas {
+  flex: 1;
+  background:
+    linear-gradient(90deg, var(--gray-100) 1px, transparent 1px),
+    linear-gradient(var(--gray-100) 1px, transparent 1px),
+    white;
+  background-size: 20px 20px;
+  overflow: auto;
+  position: relative;
+}
+
+.block-canvas-inner {
+  padding: var(--spacing-xl);
+  min-height: 100%;
+  min-width: 100%;
+  position: relative;
+}
+
+/* Root expression wrapper */
+.block-root-expression {
+  display: inline-block;
+}
+
+/* Empty canvas state */
+.block-canvas-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: var(--gray-400);
+  text-align: center;
+  padding: var(--spacing-xl);
+}
+
+.block-canvas-empty-icon {
+  font-size: 3rem;
+  margin-bottom: var(--spacing-md);
+  opacity: 0.5;
+}
+
+.block-canvas-empty-text {
+  font-size: 0.875rem;
+}
+
+/* ============================================================================
+   Base Block Styles
+   ============================================================================ */
+
+.block {
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--block-min-height);
+  padding: var(--block-padding-y) var(--block-padding-x);
+  border-radius: var(--block-border-radius);
+  border: var(--block-border-width) solid;
+  cursor: grab;
+  user-select: none;
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: white;
+  position: relative;
+  transition: transform 0.1s ease, box-shadow 0.15s ease;
+  gap: 6px;
+}
+
+.block:hover {
+  transform: translateY(-1px);
+}
+
+.block.dragging {
+  cursor: grabbing;
+  opacity: 0.95;
+  z-index: 1000;
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.25);
+  transform: scale(1.02);
+}
+
+.block.invalid {
+  animation: shake 0.3s ease-in-out;
+}
+
+.block.drop-preview {
+  opacity: 0.5;
+  pointer-events: none;
+}
+
+@keyframes shake {
+  0%, 100% { transform: translateX(0); }
+  20% { transform: translateX(-4px); }
+  40% { transform: translateX(4px); }
+  60% { transform: translateX(-4px); }
+  80% { transform: translateX(4px); }
+}
+
+/* ============================================================================
+   Block Type Variants
+   ============================================================================ */
+
+.block--comparison {
+  background: var(--block-comparison-bg);
+  border-color: var(--block-comparison-border);
+  box-shadow: 0 2px 4px var(--block-comparison-shadow);
+}
+
+.block--boolean {
+  background: var(--block-boolean-bg);
+  border-color: var(--block-boolean-border);
+  box-shadow: 0 2px 4px var(--block-boolean-shadow);
+}
+
+.block--function {
+  background: var(--block-function-bg);
+  border-color: var(--block-function-border);
+  box-shadow: 0 2px 4px var(--block-function-shadow);
+}
+
+.block--field {
+  background: var(--block-field-bg);
+  border-color: var(--block-field-border);
+  box-shadow: 0 2px 4px var(--block-field-shadow);
+}
+
+.block--literal {
+  background: var(--block-literal-bg);
+  border-color: var(--block-literal-border);
+  box-shadow: 0 2px 4px var(--block-literal-shadow);
+}
+
+.block--arithmetic {
+  background: var(--block-arithmetic-bg);
+  border-color: var(--block-arithmetic-border);
+  box-shadow: 0 2px 4px var(--block-arithmetic-shadow);
+}
+
+/* ============================================================================
+   Block Slots (Drop Zones)
+   ============================================================================ */
+
+.block-slot {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: var(--slot-min-width);
+  min-height: var(--slot-min-height);
+  padding: var(--slot-padding);
+  background: rgba(255, 255, 255, 0.15);
+  border: 2px dashed rgba(255, 255, 255, 0.4);
+  border-radius: 6px;
+  font-size: 0.75rem;
+  color: rgba(255, 255, 255, 0.6);
+  transition: all 0.15s ease;
+  vertical-align: middle;
+}
+
+.block-slot:empty::before {
+  content: attr(data-placeholder);
+  font-style: italic;
+}
+
+.block-slot.drag-over {
+  background: rgba(255, 255, 255, 0.35);
+  border-color: white;
+  border-style: solid;
+  transform: scale(1.02);
+  box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.3);
+}
+
+.block-slot.invalid-drop {
+  background: rgba(239, 68, 68, 0.3);
+  border-color: #ef4444;
+  border-style: solid;
+}
+
+/* Nested block in slot */
+.block-slot > .block {
+  margin: 0;
+}
+
+/* ============================================================================
+   Boolean Block Layout (Vertical Stacking for AND/OR)
+   ============================================================================ */
+
+.block--boolean.block--vertical {
+  flex-direction: column;
+  align-items: stretch;
+  padding: 12px;
+  min-width: 200px;
+}
+
+.block--boolean .block-operator-label {
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-size: 0.8rem;
+}
+
+.block--boolean.block--vertical .block-operator-label {
+  text-align: center;
+  margin-bottom: var(--spacing-sm);
+  padding-bottom: var(--spacing-xs);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+.block--boolean .block-children {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-sm);
+}
+
+.block--boolean .block-children .block-slot {
+  width: 100%;
+  min-width: 180px;
+}
+
+/* NOT block - horizontal layout */
+.block--boolean.block--not {
+  flex-direction: row;
+}
+
+.block--boolean.block--not .block-operator-label {
+  margin-right: var(--spacing-sm);
+}
+
+/* Add operand button */
+.block--boolean .btn-add-operand {
+  margin-top: var(--spacing-sm);
+  padding: 4px 8px;
+  background: rgba(255, 255, 255, 0.2);
+  border: 1px dashed rgba(255, 255, 255, 0.4);
+  border-radius: 4px;
+  color: white;
+  font-size: 0.75rem;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  width: 100%;
+}
+
+.block--boolean .btn-add-operand:hover {
+  background: rgba(255, 255, 255, 0.3);
+  border-style: solid;
+}
+
+/* ============================================================================
+   Function Block Layout
+   ============================================================================ */
+
+.block--function .block-function-name {
+  font-weight: 700;
+  margin-right: 2px;
+}
+
+.block--function .block-args {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.block--function .block-args::before {
+  content: '(';
+  font-weight: 600;
+}
+
+.block--function .block-args::after {
+  content: ')';
+  font-weight: 600;
+}
+
+.block--function .arg-separator {
+  margin: 0 2px;
+  opacity: 0.7;
+}
+
+.block--function .btn-add-arg {
+  margin-left: 4px;
+  padding: 2px 6px;
+  background: rgba(255, 255, 255, 0.2);
+  border: 1px solid rgba(255, 255, 255, 0.4);
+  border-radius: 4px;
+  color: white;
+  font-size: 0.7rem;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.block--function .btn-add-arg:hover {
+  background: rgba(255, 255, 255, 0.3);
+}
+
+/* ============================================================================
+   Field Reference Block
+   ============================================================================ */
+
+.block--field .block-source-label {
+  font-weight: 600;
+  opacity: 0.9;
+}
+
+.block--field .block-dot {
+  margin: 0 2px;
+  opacity: 0.7;
+}
+
+.block--field .block-field-name {
+  font-weight: 500;
+}
+
+/* ============================================================================
+   Literal Block
+   ============================================================================ */
+
+.block--literal .block-literal-type {
+  font-size: 0.65rem;
+  text-transform: uppercase;
+  opacity: 0.8;
+  margin-right: 6px;
+  padding: 2px 4px;
+  background: rgba(0, 0, 0, 0.15);
+  border-radius: 3px;
+}
+
+.block--literal .block-literal-value {
+  font-weight: 500;
+}
+
+.block--literal .block-literal-value.block-literal-string::before,
+.block--literal .block-literal-value.block-literal-string::after {
+  content: '"';
+  opacity: 0.7;
+}
+
+/* ============================================================================
+   Inline Form Controls in Blocks
+   ============================================================================ */
+
+.block select,
+.block input {
+  background: rgba(255, 255, 255, 0.9);
+  border: 1px solid rgba(255, 255, 255, 0.5);
+  border-radius: 4px;
+  padding: 4px 8px;
+  font-size: 0.8rem;
+  color: var(--gray-800);
+  cursor: pointer;
+  min-width: 60px;
+}
+
+.block select:focus,
+.block input:focus {
+  outline: none;
+  border-color: white;
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.3);
+}
+
+.block select {
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23374151' stroke-width='2'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 6px center;
+  padding-right: 24px;
+}
+
+.block input[type="text"],
+.block input[type="number"] {
+  width: 80px;
+}
+
+.block input::placeholder {
+  color: var(--gray-400);
+}
+
+/* Operator select styling */
+.block .block-operator-select {
+  font-weight: 600;
+  text-align: center;
+  min-width: 50px;
+}
+
+/* ============================================================================
+   Trash Zone
+   ============================================================================ */
+
+.block-trash {
+  position: absolute;
+  bottom: var(--spacing-lg);
+  right: var(--spacing-lg);
+  width: 70px;
+  height: 70px;
+  border-radius: 50%;
+  background: var(--gray-100);
+  border: 2px dashed var(--gray-300);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.75rem;
+  transition: all 0.2s ease;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.block-trash.visible {
+  opacity: 0.6;
+  pointer-events: auto;
+}
+
+.block-trash.drag-over {
+  opacity: 1;
+  background: #fee2e2;
+  border-color: var(--error);
+  border-style: solid;
+  transform: scale(1.1);
+}
+
+.block-trash.drag-over::after {
+  content: '';
+  position: absolute;
+  inset: -8px;
+  border-radius: 50%;
+  background: rgba(239, 68, 68, 0.15);
+  animation: pulse 0.6s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { transform: scale(1); opacity: 0.5; }
+  50% { transform: scale(1.15); opacity: 0; }
+}
+
+/* ============================================================================
+   Context Menu
+   ============================================================================ */
+
+.block-context-menu {
+  position: fixed;
+  background: white;
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg);
+  border: 1px solid var(--gray-200);
+  min-width: 150px;
+  z-index: 2000;
+  overflow: hidden;
+  animation: contextMenuIn 0.1s ease;
+}
+
+@keyframes contextMenuIn {
+  from {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.block-context-menu-item {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  padding: var(--spacing-sm) var(--spacing-md);
+  font-size: 0.875rem;
+  cursor: pointer;
+  transition: background 0.1s ease;
+  color: var(--gray-700);
+}
+
+.block-context-menu-item:hover {
+  background: var(--gray-100);
+}
+
+.block-context-menu-item.danger {
+  color: var(--error);
+}
+
+.block-context-menu-item.danger:hover {
+  background: #fee2e2;
+}
+
+.block-context-menu-item-icon {
+  width: 16px;
+  text-align: center;
+  opacity: 0.7;
+}
+
+.block-context-menu-separator {
+  height: 1px;
+  background: var(--gray-200);
+  margin: var(--spacing-xs) 0;
+}
+
+/* ============================================================================
+   Stage Configuration Styles
+   ============================================================================ */
+
+.stage-tabs {
+  display: flex;
+  gap: var(--spacing-xs);
+  padding: var(--spacing-sm) var(--spacing-md);
+  background: var(--gray-50);
+  border-bottom: 1px solid var(--gray-200);
+  overflow-x: auto;
+}
+
+.stage-tab {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  padding: var(--spacing-sm) var(--spacing-md);
+  background: white;
+  border: 1px solid var(--gray-200);
+  border-radius: var(--radius-md);
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: var(--gray-600);
+  cursor: pointer;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+}
+
+.stage-tab:hover {
+  border-color: var(--gray-300);
+  color: var(--gray-800);
+}
+
+.stage-tab.active {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: white;
+}
+
+.stage-tab-number {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.1);
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.stage-tab.active .stage-tab-number {
+  background: rgba(255, 255, 255, 0.2);
+}
+
+.stage-tab-close {
+  margin-left: var(--spacing-xs);
+  padding: 2px;
+  border-radius: 3px;
+  opacity: 0.5;
+  transition: all 0.1s ease;
+}
+
+.stage-tab-close:hover {
+  opacity: 1;
+  background: rgba(0, 0, 0, 0.1);
+}
+
+.stage-tab.active .stage-tab-close:hover {
+  background: rgba(255, 255, 255, 0.2);
+}
+
+/* Stage Panel */
+.stage-panel {
+  padding: var(--spacing-lg);
+}
+
+.stage-config-section {
+  margin-bottom: var(--spacing-xl);
+}
+
+.stage-config-section:last-child {
+  margin-bottom: 0;
+}
+
+.stage-config-section > h4 {
+  font-size: 1rem;
+  font-weight: 600;
+  margin-bottom: var(--spacing-md);
+  color: var(--gray-800);
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+}
+
+.stage-config-section > h4::before {
+  content: '';
+  display: inline-block;
+  width: 4px;
+  height: 16px;
+  background: var(--primary);
+  border-radius: 2px;
+}
+
+/* JOIN Conditions */
+.join-condition-row {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-md);
+  padding: var(--spacing-sm);
+  background: var(--gray-50);
+  border-radius: var(--radius-md);
+  margin-bottom: var(--spacing-sm);
+}
+
+.join-condition-row .form-control {
+  flex: 1;
+}
+
+.join-condition-equals {
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: var(--primary);
+}
+
+.join-condition-remove {
+  padding: var(--spacing-xs);
+  background: none;
+  border: none;
+  color: var(--gray-400);
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+  transition: all 0.1s ease;
+}
+
+.join-condition-remove:hover {
+  background: #fee2e2;
+  color: var(--error);
+}
+
+/* Result Queries */
+.result-query-card {
+  border: 1px solid var(--gray-200);
+  border-radius: var(--radius-md);
+  margin-bottom: var(--spacing-md);
+  overflow: hidden;
+}
+
+.result-query-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--spacing-sm) var(--spacing-md);
+  background: var(--gray-50);
+  border-bottom: 1px solid var(--gray-200);
+}
+
+.result-query-body {
+  padding: var(--spacing-md);
+}
+
+/* ============================================================================
+   Responsive Adjustments
+   ============================================================================ */
+
+@media (max-width: 768px) {
+  .block-editor-container {
+    flex-direction: column;
+    height: auto;
+  }
+
+  .block-toolbox {
+    width: 100%;
+    max-height: 200px;
+    border-right: none;
+    border-bottom: 1px solid var(--gray-200);
+  }
+
+  .block-toolbox-section {
+    display: inline-block;
+    vertical-align: top;
+    width: auto;
+    border-bottom: none;
+    border-right: 1px solid var(--gray-200);
+  }
+
+  .block-toolbox-items {
+    flex-direction: row;
+    flex-wrap: wrap;
+  }
+
+  .block-canvas {
+    min-height: 300px;
+  }
+
+  .block-canvas-toolbar {
+    flex-direction: column;
+    align-items: stretch;
+    gap: var(--spacing-sm);
+  }
+
+  .block-canvas-toolbar-left {
+    justify-content: center;
+  }
+}
+
+/* ============================================================================
+   Rule Cards (Multiple Rules Per Stage)
+   ============================================================================ */
+
+.section-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: var(--spacing-md);
+}
+
+.section-header h4 {
+  margin-bottom: 0;
+}
+
+.rules-empty-state {
+  padding: var(--spacing-xl);
+  text-align: center;
+  background: var(--gray-50);
+  border-radius: var(--radius-md);
+  border: 2px dashed var(--gray-200);
+}
+
+.rules-empty-state .text-gray {
+  margin-bottom: var(--spacing-xs);
+}
+
+.rules-empty-state .text-gray-light {
+  font-size: 0.875rem;
+  color: var(--gray-400);
+}
+
+.rule-card {
+  border: 1px solid var(--gray-200);
+  border-radius: var(--radius-lg);
+  margin-bottom: var(--spacing-md);
+  overflow: hidden;
+  background: white;
+  box-shadow: var(--shadow-sm);
+}
+
+.rule-card:last-child {
+  margin-bottom: 0;
+}
+
+.rule-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--spacing-sm) var(--spacing-md);
+  background: var(--gray-50);
+  border-bottom: 1px solid var(--gray-200);
+  gap: var(--spacing-md);
+}
+
+.rule-card-header-left {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  flex: 1;
+}
+
+.rule-card-header-right {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+}
+
+.rule-number {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: var(--primary);
+  color: white;
+  font-size: 0.75rem;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+
+.rule-name-input {
+  max-width: 200px;
+  font-weight: 600;
+}
+
+.rule-severity-select {
+  max-width: 100px;
+  font-size: 0.8rem;
+}
+
+.rule-toggle-btn {
+  padding: 4px 8px;
+  font-size: 0.7rem;
+}
+
+.rule-card-body {
+  padding: var(--spacing-md);
+  transition: all 0.2s ease;
+}
+
+.rule-card-body.collapsed {
+  display: none;
+}
+
+.rule-block-editor {
+  margin-top: var(--spacing-sm);
+}
+
+/* Compact Block Editor (for multiple rules) */
+.block-editor-compact {
+  height: 350px;
+}
+
+.block-editor-compact .block-toolbox {
+  width: 200px;
+}
+
+.block-editor-compact .block-toolbox-section {
+  padding: var(--spacing-sm);
+}
+
+.block-editor-compact .block-toolbox-title {
+  font-size: 0.65rem;
+  margin-bottom: var(--spacing-xs);
+}
+
+.block-editor-compact .block-toolbox-item .block {
+  font-size: 0.7rem;
+  padding: 4px 8px;
+  min-height: 28px;
+}
+
+.block-editor-compact .block-toolbox-item .block-slot {
+  min-width: 40px;
+  min-height: 20px;
+  font-size: 0.6rem;
+}
+
+.block-editor-compact .block-canvas-toolbar {
+  padding: var(--spacing-xs) var(--spacing-sm);
+}
+
+.block-editor-compact .block-canvas-toolbar .btn-sm {
+  padding: 2px 6px;
+  font-size: 0.7rem;
+}
+
+.block-editor-compact .expression-preview {
+  font-size: 0.7rem;
+}
+
+.block-editor-compact .block-trash {
+  width: 50px;
+  height: 50px;
+  font-size: 1.25rem;
+  bottom: var(--spacing-md);
+  right: var(--spacing-md);
+}
+
+/* ============================================================================
+   Rule-based Result Query Styles
+   ============================================================================ */
+
+.rule-filters-container {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--spacing-lg);
+  margin-top: var(--spacing-sm);
+}
+
+.rule-filter-column {
+  background: var(--gray-50);
+  padding: var(--spacing-md);
+  border-radius: var(--radius-md);
+}
+
+.rule-filter-column .form-label {
+  margin-bottom: var(--spacing-sm);
+  font-weight: 600;
+  font-size: 0.8rem;
+  color: var(--gray-600);
+}
+
+.rule-checkboxes {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-xs);
+}
+
+.rule-checkboxes .checkbox {
+  padding: var(--spacing-xs) var(--spacing-sm);
+  background: white;
+  border-radius: var(--radius-sm);
+  margin: 0;
+  font-size: 0.875rem;
+}
+
+.rule-checkboxes .checkbox:hover {
+  background: var(--gray-100);
+}
+
+.query-preview {
+  padding: var(--spacing-sm);
+  background: var(--gray-100);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+}
+
+/* Severity badges */
+.rule-severity-select option[value="error"] {
+  color: var(--error);
+}
+
+.rule-severity-select option[value="warning"] {
+  color: var(--warning);
+}
+
+/* Delete button styling */
+.btn.danger {
+  color: var(--gray-500);
+}
+
+.btn.danger:hover {
+  background: #fee2e2;
+  border-color: var(--error);
+  color: var(--error);
+}

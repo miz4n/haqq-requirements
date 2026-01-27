@@ -1,0 +1,543 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Step 5: Reconciliation Configuration - Reconciliation Engine</title>
+  <link rel="stylesheet" href="css/main.css">
+  <link rel="stylesheet" href="css/components.css">
+  <link rel="stylesheet" href="css/steps.css">
+</head>
+<body class="step-page">
+  <!-- Header -->
+  <header class="site-header">
+    <div class="container">
+      <div class="header-content">
+        <div class="logo">
+          <div class="logo-icon">R</div>
+          <span>Reconciliation Engine</span>
+        </div>
+        <nav>
+          <ul class="main-nav">
+            <li><a href="index.html" class="active">Create</a></li>
+            <li><a href="#">Jobs</a></li>
+            <li><a href="#">Results</a></li>
+            <li><a href="#">Settings</a></li>
+          </ul>
+        </nav>
+      </div>
+    </div>
+  </header>
+
+  <!-- Progress Stepper -->
+  <div class="container mt-3">
+    <div class="progress-stepper">
+      <div class="stepper-container">
+        <div class="step completed">
+          <div class="step-number">1</div>
+          <div class="step-label">Recon Unit</div>
+        </div>
+        <div class="step completed">
+          <div class="step-number">2</div>
+          <div class="step-label">Data Sources</div>
+        </div>
+        <div class="step completed">
+          <div class="step-number">3</div>
+          <div class="step-label">Schema</div>
+        </div>
+        <div class="step completed">
+          <div class="step-number">4</div>
+          <div class="step-label">Rules</div>
+        </div>
+        <div class="step active">
+          <div class="step-number">5</div>
+          <div class="step-label">Reconciliation</div>
+        </div>
+        <div class="step">
+          <div class="step-number">6</div>
+          <div class="step-label">Review</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Main Content -->
+  <main class="main-content">
+    <div class="container-wide">
+      <!-- Job Configuration -->
+      <div class="card mb-4">
+        <div class="card-header">
+          <h2 class="card-title">Reconciliation Job Configuration</h2>
+          <p class="card-subtitle">Define job name, schedule, and output settings</p>
+        </div>
+        <div class="card-body">
+          <div class="form-group">
+            <label class="form-label form-label-required">Job Name</label>
+            <input type="text" class="form-control" id="job-name" placeholder="daily_payment_reconciliation">
+            <span class="form-help">Unique identifier for this reconciliation job</span>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Description</label>
+            <textarea class="form-control" id="job-description" rows="3" placeholder="Reconciles daily payment transactions between gateway and bank"></textarea>
+          </div>
+
+          <!-- Schedule (Optional) -->
+          <div class="form-group">
+            <label class="checkbox">
+              <input type="checkbox" id="schedule-enabled">
+              <span>Enable Scheduled Execution</span>
+            </label>
+          </div>
+
+          <div id="schedule-config" style="display: none;">
+            <div class="card" style="background: var(--gray-50); border: 1px solid var(--gray-200);">
+              <div class="card-body">
+                <div class="form-group">
+                  <label class="form-label">Cron Expression</label>
+                  <input type="text" class="form-control" id="schedule-cron" placeholder="0 2 * * *">
+                  <span class="form-help">Examples: 0 2 * * * (daily at 2 AM), 0 */6 * * * (every 6 hours)</span>
+                </div>
+
+                <div class="form-group">
+                  <label class="form-label">Auto-generate Date Range</label>
+                  <select class="form-control" id="schedule-range">
+                    <option value="previous_day">Previous Day</option>
+                    <option value="previous_hour">Previous Hour</option>
+                    <option value="previous_week">Previous Week</option>
+                    <option value="previous_month">Previous Month</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Output Configuration -->
+      <div class="card mb-4">
+        <div class="card-header">
+          <h2 class="card-title">Output Configuration</h2>
+          <p class="card-subtitle">Configure where to store matched and unmatched records</p>
+        </div>
+        <div class="card-body">
+          <!-- Matched Outputs -->
+          <div class="mb-4">
+            <h4>Matched Records</h4>
+            <div class="form-group">
+              <label class="checkbox">
+                <input type="checkbox" id="output-matched-enabled" checked>
+                <span>Store matched records</span>
+              </label>
+            </div>
+
+            <div id="output-matched-config">
+              <div class="form-group">
+                <label class="form-label">Export Path</label>
+                <input type="text" class="form-control" id="output-matched-path" value="/results/{run_id}/matched.csv">
+                <span class="form-help">Template variables: {run_id}, {year}, {month}, {day}</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Unmatched Left -->
+          <div class="mb-4">
+            <h4>Unmatched Records (Source A)</h4>
+            <div class="form-group">
+              <label class="checkbox">
+                <input type="checkbox" id="output-unmatched-left-enabled" checked>
+                <span>Store unmatched records from Source A</span>
+              </label>
+            </div>
+
+            <div id="output-unmatched-left-config">
+              <div class="form-group">
+                <label class="form-label">Export Path</label>
+                <input type="text" class="form-control" id="output-unmatched-left-path" value="/results/{run_id}/unmatched_left.csv">
+              </div>
+            </div>
+          </div>
+
+          <!-- Unmatched Right -->
+          <div class="mb-4">
+            <h4>Unmatched Records (Source B)</h4>
+            <div class="form-group">
+              <label class="checkbox">
+                <input type="checkbox" id="output-unmatched-right-enabled" checked>
+                <span>Store unmatched records from Source B</span>
+              </label>
+            </div>
+
+            <div id="output-unmatched-right-config">
+              <div class="form-group">
+                <label class="form-label">Export Path</label>
+                <input type="text" class="form-control" id="output-unmatched-right-path" value="/results/{run_id}/unmatched_right.csv">
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Named Queries -->
+      <div class="card mb-4">
+        <div class="card-header">
+          <div style="display: flex; justify-content: space-between; align-items: center;">
+            <div>
+              <h2 class="card-title">Named Queries</h2>
+              <p class="card-subtitle">Define queries to filter matched records by rule status</p>
+            </div>
+            <button class="btn btn-secondary btn-sm" onclick="addNamedQuery()">
+              + Add Query
+            </button>
+          </div>
+        </div>
+        <div class="card-body">
+          <div class="alert alert-info mb-4">
+            <div class="alert-title">What are Named Queries?</div>
+            Named queries let you categorize matched records based on which rules passed or failed. For example, create a "perfect_matches" query for records where all rules passed, or a "warnings" query for records with minor discrepancies.
+          </div>
+
+          <div id="queries-container">
+            <!-- Queries will be rendered here -->
+          </div>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <!-- Action Bar -->
+  <div class="action-bar">
+    <div class="container">
+      <div class="action-bar-content">
+        <button class="btn btn-secondary" id="backBtn">
+          ← Back
+        </button>
+        <div style="display: flex; gap: var(--spacing-md);">
+          <button class="btn btn-outline" id="saveDraftBtn">
+            Save Draft
+          </button>
+          <button class="btn btn-primary" id="nextBtn">
+            Next: Review →
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Scripts -->
+  <script src="js/storage.js"></script>
+  <script src="js/yaml-generator.js"></script>
+  <script src="js/app.js"></script>
+  <script>
+    // State
+    let reconciliationConfig = {
+      name: '',
+      description: '',
+      schedule: null,
+      outputs: {
+        matched: {
+          store: true,
+          path: '/results/{run_id}/matched.csv'
+        },
+        unmatchedLeft: {
+          store: true,
+          path: '/results/{run_id}/unmatched_left.csv'
+        },
+        unmatchedRight: {
+          store: true,
+          path: '/results/{run_id}/unmatched_right.csv'
+        }
+      },
+      queries: []
+    };
+
+    let availableRules = [];
+
+    // Load saved state
+    const config = Storage.get();
+    if (config.reconciliation) {
+      reconciliationConfig = config.reconciliation;
+
+      // Populate form fields
+      document.getElementById('job-name').value = reconciliationConfig.name || '';
+      document.getElementById('job-description').value = reconciliationConfig.description || '';
+
+      if (reconciliationConfig.schedule) {
+        document.getElementById('schedule-enabled').checked = true;
+        document.getElementById('schedule-config').style.display = 'block';
+        document.getElementById('schedule-cron').value = reconciliationConfig.schedule.cron || '';
+        document.getElementById('schedule-range').value = reconciliationConfig.schedule.autoRange || 'previous_day';
+      }
+
+      if (reconciliationConfig.outputs) {
+        const outputs = reconciliationConfig.outputs;
+
+        document.getElementById('output-matched-enabled').checked = outputs.matched?.store !== false;
+        document.getElementById('output-matched-path').value = outputs.matched?.path || '/results/{run_id}/matched.csv';
+
+        document.getElementById('output-unmatched-left-enabled').checked = outputs.unmatchedLeft?.store !== false;
+        document.getElementById('output-unmatched-left-path').value = outputs.unmatchedLeft?.path || '/results/{run_id}/unmatched_left.csv';
+
+        document.getElementById('output-unmatched-right-enabled').checked = outputs.unmatchedRight?.store !== false;
+        document.getElementById('output-unmatched-right-path').value = outputs.unmatchedRight?.path || '/results/{run_id}/unmatched_right.csv';
+      }
+    }
+
+    // Load available rules
+    if (config.matchingRules && config.matchingRules.rules) {
+      availableRules = config.matchingRules.rules.map(r => r.name);
+    }
+
+    // Auto-populate job name from sources
+    if (!reconciliationConfig.name && config.sourceA && config.sourceB) {
+      document.getElementById('job-name').value = `${config.sourceA.name}_${config.sourceB.name}_reconciliation`;
+    }
+
+    // Initialize with default query if empty
+    if (reconciliationConfig.queries.length === 0 && availableRules.length > 0) {
+      reconciliationConfig.queries.push({
+        name: 'perfect_matches',
+        description: 'All rules passed',
+        rulesPassed: availableRules.slice(),
+        rulesFailed: [],
+        script: null
+      });
+    }
+
+    // Event listeners
+    document.getElementById('schedule-enabled').addEventListener('change', function() {
+      document.getElementById('schedule-config').style.display = this.checked ? 'block' : 'none';
+    });
+
+    document.getElementById('output-matched-enabled').addEventListener('change', function() {
+      document.getElementById('output-matched-config').style.display = this.checked ? 'block' : 'none';
+    });
+
+    document.getElementById('output-unmatched-left-enabled').addEventListener('change', function() {
+      document.getElementById('output-unmatched-left-config').style.display = this.checked ? 'block' : 'none';
+    });
+
+    document.getElementById('output-unmatched-right-enabled').addEventListener('change', function() {
+      document.getElementById('output-unmatched-right-config').style.display = this.checked ? 'block' : 'none';
+    });
+
+    // Render named queries
+    function renderNamedQueries() {
+      const container = document.getElementById('queries-container');
+
+      if (reconciliationConfig.queries.length === 0) {
+        container.innerHTML = '<p class="text-gray">No named queries defined. Click "Add Query" to create one.</p>';
+        return;
+      }
+
+      let html = '';
+      reconciliationConfig.queries.forEach((query, index) => {
+        html += `
+          <div class="card mb-3" style="border-left: 4px solid var(--primary);">
+            <div class="card-header" style="background: var(--gray-50); display: flex; justify-content: space-between; align-items: center;">
+              <input type="text" class="form-control" value="${query.name}"
+                style="width: 300px; font-weight: 600;"
+                placeholder="Query name"
+                onchange="updateQueryName(${index}, this.value)">
+              <button class="btn btn-outline btn-sm" onclick="deleteQuery(${index})">× Delete</button>
+            </div>
+            <div class="card-body">
+              <div class="form-group">
+                <label class="form-label">Description</label>
+                <input type="text" class="form-control" value="${query.description || ''}"
+                  placeholder="Describe what this query filters"
+                  onchange="updateQueryDescription(${index}, this.value)">
+              </div>
+
+              <div class="form-group">
+                <label class="form-label">Rules Passed (select all that must pass)</label>
+                <div style="max-height: 150px; overflow-y: auto; border: 1px solid var(--gray-300); border-radius: var(--radius-md); padding: var(--spacing-sm);">
+                  ${availableRules.map(rule => `
+                    <label class="checkbox" style="display: block; margin-bottom: var(--spacing-xs);">
+                      <input type="checkbox" ${query.rulesPassed.includes(rule) ? 'checked' : ''}
+                        onchange="toggleRulePassed(${index}, '${rule}', this.checked)">
+                      <span>${rule}</span>
+                    </label>
+                  `).join('')}
+                </div>
+              </div>
+
+              <div class="form-group">
+                <label class="form-label">Rules Failed (select any that must fail)</label>
+                <div style="max-height: 150px; overflow-y: auto; border: 1px solid var(--gray-300); border-radius: var(--radius-md); padding: var(--spacing-sm);">
+                  ${availableRules.map(rule => `
+                    <label class="checkbox" style="display: block; margin-bottom: var(--spacing-xs);">
+                      <input type="checkbox" ${query.rulesFailed.includes(rule) ? 'checked' : ''}
+                        onchange="toggleRuleFailed(${index}, '${rule}', this.checked)">
+                      <span>${rule}</span>
+                    </label>
+                  `).join('')}
+                </div>
+              </div>
+
+              <div class="form-group">
+                <label class="form-label">Additional Lua Filter (optional)</label>
+                <textarea class="form-control" rows="4"
+                  placeholder="return source_a.amount > 100"
+                  onchange="updateQueryScript(${index}, this.value)">${query.script || ''}</textarea>
+                <span class="form-help">Optional Lua script for additional filtering logic</span>
+              </div>
+
+              <!-- Preview -->
+              <div class="alert alert-info mt-3">
+                <strong>Query Preview:</strong><br>
+                ${query.rulesPassed.length > 0 ? `✓ Passed: ${query.rulesPassed.join(', ')}` : 'No rules passed filter'}<br>
+                ${query.rulesFailed.length > 0 ? `✗ Failed: ${query.rulesFailed.join(', ')}` : 'No rules failed filter'}
+                ${query.script ? '<br>+ Custom Lua filter applied' : ''}
+              </div>
+            </div>
+          </div>
+        `;
+      });
+
+      container.innerHTML = html;
+    }
+
+    // Named query functions
+    function addNamedQuery() {
+      if (availableRules.length === 0) {
+        App.showNotification('Please define matching rules first (Step 4)', 'error');
+        return;
+      }
+
+      const queryNum = reconciliationConfig.queries.length + 1;
+      reconciliationConfig.queries.push({
+        name: `query_${queryNum}`,
+        description: '',
+        rulesPassed: [],
+        rulesFailed: [],
+        script: null
+      });
+      renderNamedQueries();
+    }
+
+    function updateQueryName(index, value) {
+      reconciliationConfig.queries[index].name = value;
+    }
+
+    function updateQueryDescription(index, value) {
+      reconciliationConfig.queries[index].description = value;
+    }
+
+    function toggleRulePassed(index, ruleName, checked) {
+      const query = reconciliationConfig.queries[index];
+      if (checked) {
+        if (!query.rulesPassed.includes(ruleName)) {
+          query.rulesPassed.push(ruleName);
+        }
+      } else {
+        query.rulesPassed = query.rulesPassed.filter(r => r !== ruleName);
+      }
+      renderNamedQueries();
+    }
+
+    function toggleRuleFailed(index, ruleName, checked) {
+      const query = reconciliationConfig.queries[index];
+      if (checked) {
+        if (!query.rulesFailed.includes(ruleName)) {
+          query.rulesFailed.push(ruleName);
+        }
+      } else {
+        query.rulesFailed = query.rulesFailed.filter(r => r !== ruleName);
+      }
+      renderNamedQueries();
+    }
+
+    function updateQueryScript(index, value) {
+      reconciliationConfig.queries[index].script = value || null;
+    }
+
+    function deleteQuery(index) {
+      if (confirm('Are you sure you want to delete this query?')) {
+        reconciliationConfig.queries.splice(index, 1);
+        renderNamedQueries();
+      }
+    }
+
+    // Collect configuration
+    function collectConfiguration() {
+      reconciliationConfig.name = document.getElementById('job-name').value;
+      reconciliationConfig.description = document.getElementById('job-description').value;
+
+      // Schedule
+      if (document.getElementById('schedule-enabled').checked) {
+        reconciliationConfig.schedule = {
+          cron: document.getElementById('schedule-cron').value,
+          autoRange: document.getElementById('schedule-range').value
+        };
+      } else {
+        reconciliationConfig.schedule = null;
+      }
+
+      // Outputs
+      reconciliationConfig.outputs = {
+        matched: {
+          store: document.getElementById('output-matched-enabled').checked,
+          path: document.getElementById('output-matched-path').value
+        },
+        unmatchedLeft: {
+          store: document.getElementById('output-unmatched-left-enabled').checked,
+          path: document.getElementById('output-unmatched-left-path').value
+        },
+        unmatchedRight: {
+          store: document.getElementById('output-unmatched-right-enabled').checked,
+          path: document.getElementById('output-unmatched-right-path').value
+        }
+      };
+
+      return reconciliationConfig;
+    }
+
+    // Validation
+    App.validateCurrentStep = function() {
+      const data = collectConfiguration();
+
+      if (!data.name || data.name.trim() === '') {
+        App.showNotification('Please provide a job name', 'error');
+        return false;
+      }
+
+      // Validate schedule if enabled
+      if (data.schedule && (!data.schedule.cron || data.schedule.cron.trim() === '')) {
+        App.showNotification('Please provide a cron expression for the schedule', 'error');
+        return false;
+      }
+
+      // Validate at least one output is enabled
+      if (!data.outputs.matched.store && !data.outputs.unmatchedLeft.store && !data.outputs.unmatchedRight.store) {
+        App.showNotification('At least one output must be enabled', 'error');
+        return false;
+      }
+
+      // Validate query names are unique
+      const queryNames = data.queries.map(q => q.name);
+      const duplicates = queryNames.filter((name, idx) => queryNames.indexOf(name) !== idx);
+      if (duplicates.length > 0) {
+        App.showNotification(`Query names must be unique. Duplicate: ${duplicates[0]}`, 'error');
+        return false;
+      }
+
+      Storage.update('reconciliation', data);
+      App.showNotification('Reconciliation configuration saved successfully!', 'success');
+      return true;
+    };
+
+    // Initial render
+    if (availableRules.length === 0) {
+      document.getElementById('queries-container').innerHTML = `
+        <div class="alert alert-warning">
+          <div class="alert-title">No Rules Defined</div>
+          Please complete Step 4 (Matching Rules) before creating named queries.
+        </div>
+      `;
+    } else {
+      renderNamedQueries();
+    }
+  </script>
+</body>
+</html>

@@ -1,0 +1,648 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Step 2: Data Sources - Reconciliation Engine</title>
+  <link rel="stylesheet" href="css/main.css">
+  <link rel="stylesheet" href="css/components.css">
+  <link rel="stylesheet" href="css/steps.css">
+</head>
+<body class="step-page">
+  <!-- Header -->
+  <header class="site-header">
+    <div class="container">
+      <div class="header-content">
+        <div class="logo">
+          <div class="logo-icon">R</div>
+          <span>Reconciliation Engine</span>
+        </div>
+        <nav>
+          <ul class="main-nav">
+            <li><a href="index.html" class="active">Create</a></li>
+            <li><a href="#">Jobs</a></li>
+            <li><a href="#">Results</a></li>
+            <li><a href="#">Settings</a></li>
+          </ul>
+        </nav>
+      </div>
+    </div>
+  </header>
+
+  <!-- Progress Stepper (5 Steps) -->
+  <div class="container mt-3">
+    <div class="progress-stepper">
+      <div class="stepper-container">
+        <div class="step completed">
+          <div class="step-number">1</div>
+          <div class="step-label">Recon Unit</div>
+        </div>
+        <div class="step active">
+          <div class="step-number">2</div>
+          <div class="step-label">Data Sources</div>
+        </div>
+        <div class="step">
+          <div class="step-number">3</div>
+          <div class="step-label">Schema</div>
+        </div>
+        <div class="step">
+          <div class="step-number">4</div>
+          <div class="step-label">Stages & Rules</div>
+        </div>
+        <div class="step">
+          <div class="step-number">5</div>
+          <div class="step-label">Review</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Main Content -->
+  <main class="main-content">
+    <div class="container-wide">
+      <div class="card">
+        <div class="card-header">
+          <h2 class="card-title">Configure Data Sources</h2>
+          <p class="card-subtitle">Define where your reconciliation data comes from (minimum 2 sources required)</p>
+        </div>
+        <div class="card-body">
+          <div class="alert alert-info mb-4">
+            <div class="alert-title">Data Source Configuration</div>
+            Add at least 2 data sources to reconcile. Each source can be a PostgreSQL database, REST API, or SFTP file server.
+          </div>
+
+          <!-- Tabs -->
+          <div style="display: flex; align-items: center; gap: var(--spacing-sm); margin-bottom: var(--spacing-lg);">
+            <div class="tabs" id="source-tabs" style="flex: 1;">
+              <!-- Tabs will be rendered dynamically -->
+            </div>
+            <button class="btn btn-secondary btn-sm" onclick="addDataSource()">
+              + Add Data Source
+            </button>
+          </div>
+
+          <!-- Tab Contents -->
+          <div id="tab-contents">
+            <!-- Tab content will be rendered dynamically -->
+          </div>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <!-- Action Bar -->
+  <div class="action-bar">
+    <div class="container">
+      <div class="action-bar-content">
+        <button class="btn btn-secondary" id="backBtn">
+          ← Back
+        </button>
+        <div style="display: flex; gap: var(--spacing-md);">
+          <button class="btn btn-outline" id="saveDraftBtn">
+            Save Draft
+          </button>
+          <button class="btn btn-primary" id="nextBtn">
+            Next: Schema Configuration →
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Scripts -->
+  <script src="js/storage.js"></script>
+  <script src="js/yaml-generator.js"></script>
+  <script src="js/app.js"></script>
+  <script>
+    // State
+    let dataSources = [];
+    let currentTabIndex = 0;
+
+    // Load saved state
+    const config = Storage.get();
+    if (config.dataSources && config.dataSources.length > 0) {
+      dataSources = config.dataSources;
+    } else {
+      // Initialize with 2 default sources
+      dataSources = [
+        {
+          id: Storage.generateId('ds'),
+          name: '',
+          type: null,
+          description: ''
+        },
+        {
+          id: Storage.generateId('ds'),
+          name: '',
+          type: null,
+          description: ''
+        }
+      ];
+    }
+
+    // Render tabs
+    function renderTabs() {
+      const tabsContainer = document.getElementById('source-tabs');
+      let html = '';
+
+      dataSources.forEach((source, index) => {
+        const sourceName = source.name || `Data Source ${index + 1}`;
+        const isActive = index === currentTabIndex ? 'active' : '';
+        html += `
+          <button class="tab ${isActive}" onclick="switchTab(${index})">
+            ${sourceName}
+            ${dataSources.length > 2 ? `
+              <button class="btn-icon" onclick="event.stopPropagation(); removeDataSource(${index})"
+                title="Remove data source" style="margin-left: 8px; color: var(--error);">
+                ×
+              </button>
+            ` : ''}
+          </button>
+        `;
+      });
+
+      tabsContainer.innerHTML = html;
+    }
+
+    // Render tab content
+    function renderTabContent() {
+      const container = document.getElementById('tab-contents');
+      const source = dataSources[currentTabIndex];
+
+      let html = `
+        <div class="tab-content active">
+          <!-- Basic Info -->
+          <div class="card mb-4">
+            <div class="card-header">
+              <h4 class="card-title">Basic Information</h4>
+            </div>
+            <div class="card-body">
+              <div class="form-group">
+                <label class="form-label form-label-required">Data Source Name</label>
+                <input type="text" class="form-control" id="source-${source.id}-name"
+                  value="${source.name || ''}" placeholder="e.g., internal_ledger, payment_gateway"
+                  onchange="updateSourceName(${currentTabIndex}, this.value)">
+                <span class="form-help">Unique identifier for this data source</span>
+              </div>
+
+              <div class="form-group">
+                <label class="form-label">Description</label>
+                <input type="text" class="form-control" id="source-${source.id}-description"
+                  value="${source.description || ''}" placeholder="Optional description">
+              </div>
+            </div>
+          </div>
+
+          <!-- Data Source Type Selection -->
+          <div class="mb-4">
+            <h4 class="mb-3">Select Data Source Type</h4>
+            <div class="datasource-type-cards">
+              <div class="datasource-type-card ${source.type === 'postgresql' ? 'selected' : ''}"
+                onclick="selectSourceType(${currentTabIndex}, 'postgresql')">
+                <div class="datasource-icon">🗄️</div>
+                <div class="datasource-title">PostgreSQL</div>
+                <div class="datasource-description">Query from PostgreSQL database</div>
+              </div>
+
+              <div class="datasource-type-card ${source.type === 'api' ? 'selected' : ''}"
+                onclick="selectSourceType(${currentTabIndex}, 'api')">
+                <div class="datasource-icon">🌐</div>
+                <div class="datasource-title">REST API</div>
+                <div class="datasource-description">Fetch data from HTTP endpoint</div>
+              </div>
+
+              <div class="datasource-type-card ${source.type === 'sftp' ? 'selected' : ''}"
+                onclick="selectSourceType(${currentTabIndex}, 'sftp')">
+                <div class="datasource-icon">📁</div>
+                <div class="datasource-title">SFTP</div>
+                <div class="datasource-description">Download files from SFTP server</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Configuration Form -->
+          <div id="source-${source.id}-config">
+            ${source.type ? renderSourceConfig(source) : '<p class="text-gray">Select a data source type above to configure</p>'}
+          </div>
+        </div>
+      `;
+
+      container.innerHTML = html;
+    }
+
+    // Render source configuration form based on type
+    function renderSourceConfig(source) {
+      if (source.type === 'postgresql') {
+        return `
+          <div class="card">
+            <div class="card-header">
+              <h4 class="card-title">PostgreSQL Configuration</h4>
+            </div>
+            <div class="card-body">
+              <div class="form-group">
+                <label class="form-label form-label-required">Host</label>
+                <input type="text" class="form-control" id="source-${source.id}-host"
+                  value="${source.host || ''}" placeholder="localhost">
+              </div>
+
+              <div class="form-group">
+                <label class="form-label form-label-required">Port</label>
+                <input type="number" class="form-control" id="source-${source.id}-port"
+                  value="${source.port || 5432}" placeholder="5432">
+              </div>
+
+              <div class="form-group">
+                <label class="form-label form-label-required">Database</label>
+                <input type="text" class="form-control" id="source-${source.id}-database"
+                  value="${source.database || ''}" placeholder="transactions">
+              </div>
+
+              <div class="form-group">
+                <label class="form-label form-label-required">Schema</label>
+                <input type="text" class="form-control" id="source-${source.id}-schema"
+                  value="${source.schema || 'public'}" placeholder="public">
+              </div>
+
+              <div class="form-group">
+                <label class="form-label form-label-required">Username</label>
+                <input type="text" class="form-control" id="source-${source.id}-username"
+                  value="${source.username || ''}" placeholder="readonly_user">
+              </div>
+
+              <div class="form-group">
+                <label class="checkbox">
+                  <input type="checkbox" id="source-${source.id}-ssl" ${source.sslEnabled ? 'checked' : ''}>
+                  <span>Enable SSL</span>
+                </label>
+              </div>
+
+              <div class="form-group">
+                <label class="form-label form-label-required">SQL Query Template</label>
+                <textarea class="form-control" id="source-${source.id}-query" rows="8"
+                  placeholder="SELECT * FROM transactions WHERE date >= '{start_date}' AND date < '{end_date}'">${source.query || ''}</textarea>
+                <span class="form-help">Use {start_date} and {end_date} as template variables</span>
+              </div>
+
+              <button class="btn btn-outline btn-sm" onclick="testConnection(${currentTabIndex})">
+                Test Connection
+              </button>
+            </div>
+          </div>
+        `;
+      } else if (source.type === 'api') {
+        return `
+          <div class="card">
+            <div class="card-header">
+              <h4 class="card-title">REST API Configuration</h4>
+            </div>
+            <div class="card-body">
+              <div class="form-group">
+                <label class="form-label form-label-required">Base URL</label>
+                <input type="text" class="form-control" id="source-${source.id}-base-url"
+                  value="${source.baseUrl || ''}" placeholder="https://api.example.com">
+              </div>
+
+              <div class="form-group">
+                <label class="form-label form-label-required">Endpoint Path</label>
+                <input type="text" class="form-control" id="source-${source.id}-endpoint"
+                  value="${source.endpoint || ''}" placeholder="/v1/transactions">
+              </div>
+
+              <div class="form-group">
+                <label class="form-label">HTTP Method</label>
+                <select class="form-control" id="source-${source.id}-method">
+                  <option value="GET" ${source.method === 'GET' ? 'selected' : ''}>GET</option>
+                  <option value="POST" ${source.method === 'POST' ? 'selected' : ''}>POST</option>
+                </select>
+              </div>
+
+              <div class="form-group">
+                <label class="form-label">Authentication Type</label>
+                <select class="form-control" id="source-${source.id}-auth-type">
+                  <option value="bearer" ${source.authType === 'bearer' ? 'selected' : ''}>Bearer Token</option>
+                  <option value="api_key" ${source.authType === 'api_key' ? 'selected' : ''}>API Key</option>
+                  <option value="basic" ${source.authType === 'basic' ? 'selected' : ''}>Basic Auth</option>
+                  <option value="oauth2" ${source.authType === 'oauth2' ? 'selected' : ''}>OAuth 2.0</option>
+                </select>
+              </div>
+
+              <div class="form-group">
+                <label class="form-label">Query Parameters (JSON)</label>
+                <textarea class="form-control" id="source-${source.id}-query-params" rows="4"
+                  placeholder='{"date": "{year}-{month}-{day}", "status": "completed"}'>${source.queryParams ? JSON.stringify(source.queryParams, null, 2) : ''}</textarea>
+                <span class="form-help">Use template variables like {year}, {month}, {day}</span>
+              </div>
+
+              <div class="form-group">
+                <label class="form-label">Response Array Path</label>
+                <input type="text" class="form-control" id="source-${source.id}-array-path"
+                  value="${source.arrayPath || ''}" placeholder="data.transactions">
+                <span class="form-help">JSON path to the array of records (e.g., data.transactions)</span>
+              </div>
+
+              <div class="form-group">
+                <label class="form-label">Timeout (seconds)</label>
+                <input type="number" class="form-control" id="source-${source.id}-timeout"
+                  value="${source.timeout || 60}" placeholder="60">
+              </div>
+
+              <button class="btn btn-outline btn-sm" onclick="testConnection(${currentTabIndex})">
+                Test Connection
+              </button>
+            </div>
+          </div>
+        `;
+      } else if (source.type === 'sftp') {
+        return `
+          <div class="card">
+            <div class="card-header">
+              <h4 class="card-title">SFTP Configuration</h4>
+            </div>
+            <div class="card-body">
+              <div class="form-group">
+                <label class="form-label form-label-required">Host</label>
+                <input type="text" class="form-control" id="source-${source.id}-host"
+                  value="${source.host || ''}" placeholder="sftp.example.com">
+              </div>
+
+              <div class="form-group">
+                <label class="form-label form-label-required">Port</label>
+                <input type="number" class="form-control" id="source-${source.id}-port"
+                  value="${source.port || 22}" placeholder="22">
+              </div>
+
+              <div class="form-group">
+                <label class="form-label form-label-required">Username</label>
+                <input type="text" class="form-control" id="source-${source.id}-username"
+                  value="${source.username || ''}" placeholder="sftp_user">
+              </div>
+
+              <div class="form-group">
+                <label class="form-label">Authentication Type</label>
+                <select class="form-control" id="source-${source.id}-auth-type">
+                  <option value="password" ${source.authType === 'password' ? 'selected' : ''}>Password</option>
+                  <option value="private_key" ${source.authType === 'private_key' ? 'selected' : ''}>Private Key</option>
+                </select>
+              </div>
+
+              <div class="form-group">
+                <label class="form-label form-label-required">Directory Path</label>
+                <input type="text" class="form-control" id="source-${source.id}-directory"
+                  value="${source.directory || ''}" placeholder="/data/reconciliation">
+              </div>
+
+              <div class="form-group">
+                <label class="form-label form-label-required">File Pattern</label>
+                <input type="text" class="form-control" id="source-${source.id}-file-pattern"
+                  value="${source.filePattern || ''}" placeholder="transactions_{year}{month}{day}.csv">
+                <span class="form-help">Use template variables: {year}, {month}, {day}</span>
+              </div>
+
+              <div class="form-group">
+                <label class="form-label">File Encoding</label>
+                <input type="text" class="form-control" id="source-${source.id}-encoding"
+                  value="${source.encoding || 'UTF-8'}" placeholder="UTF-8">
+              </div>
+
+              <div class="form-group">
+                <label class="form-label">Compression</label>
+                <select class="form-control" id="source-${source.id}-compression">
+                  <option value="none" ${source.compression === 'none' ? 'selected' : ''}>None</option>
+                  <option value="gzip" ${source.compression === 'gzip' ? 'selected' : ''}>Gzip</option>
+                  <option value="zip" ${source.compression === 'zip' ? 'selected' : ''}>Zip</option>
+                </select>
+              </div>
+
+              <div class="form-group">
+                <label class="form-label">CSV Delimiter</label>
+                <input type="text" class="form-control" id="source-${source.id}-delimiter"
+                  value="${source.delimiter || ','}" placeholder="," maxlength="1">
+              </div>
+
+              <div class="form-group">
+                <label class="checkbox">
+                  <input type="checkbox" id="source-${source.id}-header-row" ${source.headerRow !== false ? 'checked' : ''}>
+                  <span>File has header row</span>
+                </label>
+              </div>
+
+              <button class="btn btn-outline btn-sm" onclick="testConnection(${currentTabIndex})">
+                Test Connection
+              </button>
+            </div>
+          </div>
+        `;
+      }
+
+      return '';
+    }
+
+    // Switch to a different tab
+    function switchTab(index) {
+      // Save current tab data before switching
+      if (dataSources[currentTabIndex]) {
+        saveCurrentSource();
+      }
+
+      currentTabIndex = index;
+      renderTabs();
+      renderTabContent();
+    }
+
+    // Update source name and re-render tabs
+    function updateSourceName(index, name) {
+      dataSources[index].name = name;
+      renderTabs();
+      saveCurrentSource();
+    }
+
+    // Save current source data to memory
+    function saveCurrentSource() {
+      const source = dataSources[currentTabIndex];
+      const collectedData = collectSourceData(source);
+
+      // Update the data source in memory
+      dataSources[currentTabIndex] = collectedData;
+    }
+
+    // Select source type
+    function selectSourceType(index, type) {
+      dataSources[index].type = type;
+      dataSources[index].formatType = type === 'postgresql' ? 'tabular' :
+                                       type === 'api' ? 'json' : 'csv';
+      renderTabContent();
+    }
+
+    // Add new data source
+    function addDataSource() {
+      dataSources.push({
+        id: Storage.generateId('ds'),
+        name: '',
+        type: null,
+        description: ''
+      });
+      currentTabIndex = dataSources.length - 1;
+      renderTabs();
+      renderTabContent();
+      App.showNotification('New data source added', 'success');
+    }
+
+    // Remove data source
+    function removeDataSource(index) {
+      if (dataSources.length <= 2) {
+        App.showNotification('At least 2 data sources are required', 'error');
+        return;
+      }
+
+      const sourceName = dataSources[index].name || `Data Source ${index + 1}`;
+      if (confirm(`Are you sure you want to remove "${sourceName}"?`)) {
+        dataSources.splice(index, 1);
+        if (currentTabIndex >= dataSources.length) {
+          currentTabIndex = dataSources.length - 1;
+        }
+        renderTabs();
+        renderTabContent();
+        App.showNotification('Data source removed', 'info');
+      }
+    }
+
+    // Test connection (mock)
+    function testConnection(index) {
+      const source = dataSources[index];
+      if (!source.type) {
+        App.showNotification('Please select a data source type first', 'error');
+        return;
+      }
+
+      App.showNotification('Testing connection...', 'info');
+      setTimeout(() => {
+        App.showNotification('Connection test successful! (mock)', 'success');
+      }, 1000);
+    }
+
+    // Collect data from form
+    function collectSourceData(source) {
+      const data = {
+        id: source.id,
+        name: document.getElementById(`source-${source.id}-name`)?.value || '',
+        description: document.getElementById(`source-${source.id}-description`)?.value || '',
+        type: source.type,
+        formatType: source.formatType
+      };
+
+      if (source.type === 'postgresql') {
+        data.host = document.getElementById(`source-${source.id}-host`)?.value || '';
+        data.port = parseInt(document.getElementById(`source-${source.id}-port`)?.value) || 5432;
+        data.database = document.getElementById(`source-${source.id}-database`)?.value || '';
+        data.schema = document.getElementById(`source-${source.id}-schema`)?.value || 'public';
+        data.username = document.getElementById(`source-${source.id}-username`)?.value || '';
+        data.sslEnabled = document.getElementById(`source-${source.id}-ssl`)?.checked || false;
+        data.query = document.getElementById(`source-${source.id}-query`)?.value || '';
+      } else if (source.type === 'api') {
+        data.baseUrl = document.getElementById(`source-${source.id}-base-url`)?.value || '';
+        data.endpoint = document.getElementById(`source-${source.id}-endpoint`)?.value || '';
+        data.method = document.getElementById(`source-${source.id}-method`)?.value || 'GET';
+        data.authType = document.getElementById(`source-${source.id}-auth-type`)?.value || 'bearer';
+
+        const queryParamsStr = document.getElementById(`source-${source.id}-query-params`)?.value || '';
+        try {
+          data.queryParams = queryParamsStr ? JSON.parse(queryParamsStr) : {};
+        } catch (e) {
+          data.queryParams = {};
+        }
+
+        data.arrayPath = document.getElementById(`source-${source.id}-array-path`)?.value || '';
+        data.timeout = parseInt(document.getElementById(`source-${source.id}-timeout`)?.value) || 60;
+      } else if (source.type === 'sftp') {
+        data.host = document.getElementById(`source-${source.id}-host`)?.value || '';
+        data.port = parseInt(document.getElementById(`source-${source.id}-port`)?.value) || 22;
+        data.username = document.getElementById(`source-${source.id}-username`)?.value || '';
+        data.authType = document.getElementById(`source-${source.id}-auth-type`)?.value || 'password';
+        data.directory = document.getElementById(`source-${source.id}-directory`)?.value || '';
+        data.filePattern = document.getElementById(`source-${source.id}-file-pattern`)?.value || '';
+        data.encoding = document.getElementById(`source-${source.id}-encoding`)?.value || 'UTF-8';
+        data.compression = document.getElementById(`source-${source.id}-compression`)?.value || 'none';
+        data.delimiter = document.getElementById(`source-${source.id}-delimiter`)?.value || ',';
+        data.headerRow = document.getElementById(`source-${source.id}-header-row`)?.checked !== false;
+      }
+
+      return data;
+    }
+
+    // Save all data sources
+    function saveDataSources() {
+      // Save current tab first
+      saveCurrentSource();
+
+      // Validate
+      if (dataSources.length < 2) {
+        App.showNotification('At least 2 data sources are required', 'error');
+        return false;
+      }
+
+      // Check all sources have names
+      for (let i = 0; i < dataSources.length; i++) {
+        if (!dataSources[i].name || dataSources[i].name.trim() === '') {
+          App.showNotification(`Data Source ${i + 1} must have a name`, 'error');
+          return false;
+        }
+      }
+
+      // Check for duplicate names
+      const names = dataSources.map(s => s.name.toLowerCase());
+      const duplicates = names.filter((name, idx) => names.indexOf(name) !== idx);
+      if (duplicates.length > 0) {
+        App.showNotification(`Duplicate data source name: ${duplicates[0]}`, 'error');
+        return false;
+      }
+
+      // Check all sources have types
+      for (let i = 0; i < dataSources.length; i++) {
+        if (!dataSources[i].type) {
+          App.showNotification(`Please select a type for ${dataSources[i].name || 'Data Source ' + (i + 1)}`, 'error');
+          return false;
+        }
+      }
+
+      // Validate type-specific required fields
+      for (let i = 0; i < dataSources.length; i++) {
+        const source = dataSources[i];
+        if (source.type === 'postgresql') {
+          if (!source.host || !source.database || !source.username || !source.query) {
+            App.showNotification(`${source.name}: Missing required PostgreSQL fields`, 'error');
+            return false;
+          }
+        } else if (source.type === 'api') {
+          if (!source.baseUrl || !source.endpoint) {
+            App.showNotification(`${source.name}: Missing required API fields`, 'error');
+            return false;
+          }
+        } else if (source.type === 'sftp') {
+          if (!source.host || !source.username || !source.directory || !source.filePattern) {
+            App.showNotification(`${source.name}: Missing required SFTP fields`, 'error');
+            return false;
+          }
+        }
+      }
+
+      // Save to storage
+      Storage.update('dataSources', dataSources);
+      return true;
+    }
+
+    // Validation for next button
+    App.validateCurrentStep = function() {
+      if (!saveDataSources()) {
+        return false;
+      }
+
+      App.showNotification('Data sources saved successfully!', 'success');
+      return true;
+    };
+
+    // Initial render
+    renderTabs();
+    renderTabContent();
+  </script>
+</body>
+</html>

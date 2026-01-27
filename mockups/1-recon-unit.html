@@ -1,0 +1,294 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Step 1: Reconciliation Unit - Reconciliation Engine</title>
+  <link rel="stylesheet" href="css/main.css">
+  <link rel="stylesheet" href="css/components.css">
+  <link rel="stylesheet" href="css/steps.css">
+</head>
+<body class="step-page">
+  <!-- Header -->
+  <header class="site-header">
+    <div class="container">
+      <div class="header-content">
+        <div class="logo">
+          <div class="logo-icon">R</div>
+          <span>Reconciliation Engine</span>
+        </div>
+        <nav>
+          <ul class="main-nav">
+            <li><a href="index.html" class="active">Create</a></li>
+            <li><a href="#">Jobs</a></li>
+            <li><a href="#">Results</a></li>
+            <li><a href="#">Settings</a></li>
+          </ul>
+        </nav>
+      </div>
+    </div>
+  </header>
+
+  <!-- Progress Stepper (5 Steps) -->
+  <div class="container mt-3">
+    <div class="progress-stepper">
+      <div class="stepper-container">
+        <div class="step active">
+          <div class="step-number">1</div>
+          <div class="step-label">Recon Unit</div>
+        </div>
+        <div class="step">
+          <div class="step-number">2</div>
+          <div class="step-label">Data Sources</div>
+        </div>
+        <div class="step">
+          <div class="step-number">3</div>
+          <div class="step-label">Schema</div>
+        </div>
+        <div class="step">
+          <div class="step-number">4</div>
+          <div class="step-label">Stages & Rules</div>
+        </div>
+        <div class="step">
+          <div class="step-number">5</div>
+          <div class="step-label">Review</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Main Content -->
+  <main class="main-content">
+    <div class="container">
+      <div class="step-content">
+        <!-- Main Form -->
+        <div class="step-main">
+          <div class="card">
+            <div class="card-header">
+              <h2 class="card-title">Select Reconciliation Unit</h2>
+              <p class="card-subtitle">Define how to subdivide the reconciliation timeframe</p>
+            </div>
+            <div class="card-body">
+              <div class="alert alert-info mb-4">
+                <div class="alert-title">What is a Reconciliation Unit?</div>
+                A reconciliation unit defines how your data will be subdivided for processing. For example, with a <strong>daily</strong> interval,
+                the system will process one day of data at a time using the dateTimeRange you provide at runtime.
+              </div>
+
+              <form id="reconUnitForm">
+                <!-- Interval Selection -->
+                <div class="form-group">
+                  <label class="form-label form-label-required">Time Interval</label>
+                  <div style="display: flex; flex-direction: column; gap: var(--spacing-md);">
+                    <label class="radio">
+                      <input type="radio" name="interval" value="day" checked>
+                      <div>
+                        <div class="font-semibold">Day</div>
+                        <div class="text-sm text-gray">Process data in daily intervals (most common)</div>
+                      </div>
+                    </label>
+
+                    <label class="radio">
+                      <input type="radio" name="interval" value="hour">
+                      <div>
+                        <div class="font-semibold">Hour</div>
+                        <div class="text-sm text-gray">Process data in hourly intervals (for high-frequency reconciliation)</div>
+                      </div>
+                    </label>
+
+                    <label class="radio">
+                      <input type="radio" name="interval" value="minute">
+                      <div>
+                        <div class="font-semibold">Minute</div>
+                        <div class="text-sm text-gray">Process data in minute intervals (for real-time reconciliation)</div>
+                      </div>
+                    </label>
+                  </div>
+                  <span class="form-help">
+                    This determines how the system subdivides the dateTimeRange you provide at runtime.
+                  </span>
+                </div>
+
+                <!-- Timezone (Read-only) -->
+                <div class="form-group">
+                  <label class="form-label">Timezone</label>
+                  <input type="text" class="form-control" value="UTC" readonly disabled>
+                  <span class="form-help">
+                    Only UTC timezone is supported. All timestamps must be in UTC for consistency.
+                  </span>
+                </div>
+
+                <!-- Preview -->
+                <div class="card" style="background: var(--gray-50); border: 1px solid var(--gray-200);">
+                  <div class="card-header">
+                    <h4 class="card-title">Preview</h4>
+                  </div>
+                  <div class="card-body">
+                    <p class="mb-2"><strong>Configuration:</strong></p>
+                    <p id="previewText" class="text-gray">
+                      Data will be processed in <strong class="text-primary">daily</strong> intervals using <strong>UTC</strong> timezone.
+                    </p>
+                    <p class="mt-3 mb-2"><strong>Example Runtime Execution:</strong></p>
+                    <code style="display: block; background: var(--gray-900); color: var(--gray-100); padding: var(--spacing-md); border-radius: var(--radius-md);">
+                      <span id="exampleCommand">
+                        reconciliation-cli run --config job.yaml \<br>
+                        &nbsp;&nbsp;--datetime-range 2024-03-15T00:00:00Z/2024-03-16T00:00:00Z
+                      </span>
+                    </code>
+                    <p class="text-sm text-gray mt-2">
+                      This will process <span id="exampleExplanation">one full day (2024-03-15)</span> of data.
+                    </p>
+                  </div>
+                </div>
+              </form>
+            </div>
+          </div>
+        </div>
+
+        <!-- YAML Preview Sidebar -->
+        <div class="step-sidebar">
+          <div class="card">
+            <div class="card-header">
+              <h4 class="card-title">YAML Preview</h4>
+              <p class="card-subtitle">Generated configuration</p>
+            </div>
+            <div class="card-body">
+              <pre id="yamlPreview" style="background: var(--gray-900); color: var(--gray-100); padding: var(--spacing-md); border-radius: var(--radius-md); font-size: 0.875rem; line-height: 1.6; overflow-x: auto;"><code><span style="color: #60a5fa;">reconciliation_unit</span>:
+  <span style="color: #60a5fa;">interval</span>: <span style="color: #34d399;">day</span>  <span style="color: #6b7280;"># day, hour, or minute</span>
+  <span style="color: #60a5fa;">timezone</span>: <span style="color: #34d399;">UTC</span>  <span style="color: #6b7280;"># Only UTC supported</span></code></pre>
+
+              <div class="mt-3">
+                <button class="btn btn-secondary btn-sm btn-block" onclick="copyYAML()">
+                  📋 Copy YAML
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Help Card -->
+          <div class="card mt-3">
+            <div class="card-header">
+              <h4 class="card-title">💡 Tips</h4>
+            </div>
+            <div class="card-body">
+              <ul style="margin-left: 1.25rem; font-size: 0.875rem; color: var(--gray-700);">
+                <li class="mb-2">Use <strong>day</strong> for standard daily reconciliation</li>
+                <li class="mb-2">Use <strong>hour</strong> for intraday processing</li>
+                <li class="mb-2">Use <strong>minute</strong> for near real-time reconciliation</li>
+                <li>All timestamps must be in UTC format</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <!-- Action Bar -->
+  <div class="action-bar">
+    <div class="container">
+      <div class="action-bar-content">
+        <button class="btn btn-secondary" id="backBtn">
+          ← Back
+        </button>
+        <div style="display: flex; gap: var(--spacing-md);">
+          <button class="btn btn-outline" id="saveDraftBtn">
+            Save Draft
+          </button>
+          <button class="btn btn-primary" id="nextBtn">
+            Next: Data Sources →
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Scripts -->
+  <script src="js/storage.js"></script>
+  <script src="js/yaml-generator.js"></script>
+  <script src="js/app.js"></script>
+  <script>
+    // Load saved state
+    const config = Storage.get();
+    if (config.reconUnit) {
+      document.querySelector(`input[name="interval"][value="${config.reconUnit.interval}"]`).checked = true;
+      updatePreview();
+    }
+
+    // Listen for interval changes
+    document.querySelectorAll('input[name="interval"]').forEach(radio => {
+      radio.addEventListener('change', updatePreview);
+    });
+
+    // Update preview based on selected interval
+    function updatePreview() {
+      const interval = document.querySelector('input[name="interval"]:checked').value;
+
+      // Update preview text
+      const intervalText = {
+        'day': 'daily',
+        'hour': 'hourly',
+        'minute': 'minute'
+      }[interval];
+
+      document.getElementById('previewText').innerHTML =
+        `Data will be processed in <strong class="text-primary">${intervalText}</strong> intervals using <strong>UTC</strong> timezone.`;
+
+      // Update example command
+      let dateRange, explanation;
+      if (interval === 'day') {
+        dateRange = '2024-03-15T00:00:00Z/2024-03-16T00:00:00Z';
+        explanation = 'one full day (2024-03-15)';
+      } else if (interval === 'hour') {
+        dateRange = '2024-03-15T10:00:00Z/2024-03-15T11:00:00Z';
+        explanation = 'one hour (10:00-11:00 UTC on 2024-03-15)';
+      } else {
+        dateRange = '2024-03-15T10:30:00Z/2024-03-15T10:31:00Z';
+        explanation = 'one minute (10:30-10:31 UTC on 2024-03-15)';
+      }
+
+      document.getElementById('exampleCommand').innerHTML =
+        `reconciliation-cli run --config job.yaml \\<br>&nbsp;&nbsp;--datetime-range ${dateRange}`;
+
+      document.getElementById('exampleExplanation').textContent = explanation;
+
+      // Update YAML preview
+      updateYAMLPreview();
+    }
+
+    // Update YAML preview
+    function updateYAMLPreview() {
+      const interval = document.querySelector('input[name="interval"]:checked').value;
+
+      document.getElementById('yamlPreview').innerHTML =
+`<code><span style="color: #60a5fa;">reconciliation_unit</span>:
+  <span style="color: #60a5fa;">interval</span>: <span style="color: #34d399;">${interval}</span>  <span style="color: #6b7280;"># day, hour, or minute</span>
+  <span style="color: #60a5fa;">timezone</span>: <span style="color: #34d399;">UTC</span>  <span style="color: #6b7280;"># Only UTC supported</span></code>`;
+    }
+
+    // Copy YAML to clipboard
+    function copyYAML() {
+      const interval = document.querySelector('input[name="interval"]:checked').value;
+      const yaml = `reconciliation_unit:
+  interval: ${interval}  # day, hour, or minute
+  timezone: UTC  # Only UTC supported`;
+
+      App.copyToClipboard(yaml);
+    }
+
+    // Override validation
+    App.validateCurrentStep = function() {
+      const interval = document.querySelector('input[name="interval"]:checked').value;
+
+      // Save to storage
+      Storage.update('reconUnit', {
+        interval: interval,
+        timezone: 'UTC'
+      });
+
+      App.showNotification('Reconciliation unit saved!', 'success');
+      return true;
+    };
+  </script>
+</body>
+</html>

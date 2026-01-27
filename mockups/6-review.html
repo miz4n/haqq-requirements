@@ -1,0 +1,476 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Step 6: Review & Export - Reconciliation Engine</title>
+  <link rel="stylesheet" href="css/main.css">
+  <link rel="stylesheet" href="css/components.css">
+  <link rel="stylesheet" href="css/steps.css">
+</head>
+<body class="step-page">
+  <!-- Header -->
+  <header class="site-header">
+    <div class="container">
+      <div class="header-content">
+        <div class="logo">
+          <div class="logo-icon">R</div>
+          <span>Reconciliation Engine</span>
+        </div>
+        <nav>
+          <ul class="main-nav">
+            <li><a href="index.html" class="active">Create</a></li>
+            <li><a href="#">Jobs</a></li>
+            <li><a href="#">Results</a></li>
+            <li><a href="#">Settings</a></li>
+          </ul>
+        </nav>
+      </div>
+    </div>
+  </header>
+
+  <!-- Progress Stepper -->
+  <div class="container mt-3">
+    <div class="progress-stepper">
+      <div class="stepper-container">
+        <div class="step completed">
+          <div class="step-number">1</div>
+          <div class="step-label">Recon Unit</div>
+        </div>
+        <div class="step completed">
+          <div class="step-number">2</div>
+          <div class="step-label">Data Sources</div>
+        </div>
+        <div class="step completed">
+          <div class="step-number">3</div>
+          <div class="step-label">Schema</div>
+        </div>
+        <div class="step completed">
+          <div class="step-number">4</div>
+          <div class="step-label">Rules</div>
+        </div>
+        <div class="step completed">
+          <div class="step-number">5</div>
+          <div class="step-label">Reconciliation</div>
+        </div>
+        <div class="step active">
+          <div class="step-number">6</div>
+          <div class="step-label">Review</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Main Content -->
+  <main class="main-content">
+    <div class="container-wide">
+      <div class="card mb-4">
+        <div class="card-header">
+          <h2 class="card-title">Review Configuration</h2>
+          <p class="card-subtitle">Review your complete reconciliation setup before exporting</p>
+        </div>
+        <div class="card-body">
+          <div class="alert alert-success mb-4">
+            <div class="alert-title">Configuration Complete!</div>
+            Your reconciliation configuration is ready. Review the summary below and download the YAML file to use with the reconciliation engine.
+          </div>
+
+          <!-- Summary Cards -->
+          <div id="summary-container">
+            <!-- Summary will be rendered here -->
+          </div>
+        </div>
+      </div>
+
+      <!-- YAML Preview -->
+      <div class="card mb-4">
+        <div class="card-header">
+          <div style="display: flex; justify-content: space-between; align-items: center;">
+            <div>
+              <h2 class="card-title">Complete YAML Configuration</h2>
+              <p class="card-subtitle">Production-ready configuration file</p>
+            </div>
+            <div style="display: flex; gap: var(--spacing-md);">
+              <button class="btn btn-outline" onclick="copyYAML()">
+                📋 Copy to Clipboard
+              </button>
+              <button class="btn btn-primary" onclick="downloadYAML()">
+                ⬇️ Download YAML
+              </button>
+            </div>
+          </div>
+        </div>
+        <div class="card-body">
+          <pre id="yaml-preview" style="background: var(--gray-900); color: var(--gray-100); padding: var(--spacing-lg); border-radius: var(--radius-md); font-size: 0.875rem; line-height: 1.6; overflow-x: auto; max-height: 600px; overflow-y: auto;"></pre>
+        </div>
+      </div>
+
+      <!-- Actions -->
+      <div class="card">
+        <div class="card-body" style="text-align: center;">
+          <h3 class="mb-3">What's Next?</h3>
+          <p class="text-gray mb-4">You can download the YAML configuration and use it with the reconciliation engine CLI, or make changes to your configuration.</p>
+          <div style="display: flex; gap: var(--spacing-md); justify-content: center; flex-wrap: wrap;">
+            <button class="btn btn-outline" onclick="startOver()">
+              🔄 Start Over
+            </button>
+            <button class="btn btn-outline" onclick="saveDraft()">
+              💾 Save Draft
+            </button>
+            <button class="btn btn-primary btn-lg" onclick="downloadYAML()">
+              ⬇️ Download YAML Configuration
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <!-- Action Bar -->
+  <div class="action-bar">
+    <div class="container">
+      <div class="action-bar-content">
+        <button class="btn btn-secondary" id="backBtn">
+          ← Back
+        </button>
+        <div style="display: flex; gap: var(--spacing-md);">
+          <button class="btn btn-outline" onclick="downloadYAML()">
+            ⬇️ Download YAML
+          </button>
+          <button class="btn btn-primary" onclick="window.location.href='index.html'">
+            ✓ Done
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Scripts -->
+  <script src="js/storage.js"></script>
+  <script src="js/yaml-generator.js"></script>
+  <script src="js/app.js"></script>
+  <script>
+    // Load complete configuration
+    const config = Storage.get();
+
+    // Render summary cards
+    function renderSummary() {
+      const container = document.getElementById('summary-container');
+      let html = '<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: var(--spacing-lg);">';
+
+      // Reconciliation Unit
+      if (config.reconUnit) {
+        html += `
+          <div class="card card-compact">
+            <div class="card-header" style="background: var(--primary); color: white;">
+              <h4 class="card-title" style="margin: 0;">Reconciliation Unit</h4>
+            </div>
+            <div class="card-body">
+              <div style="margin-bottom: var(--spacing-sm);">
+                <strong>Interval:</strong> ${config.reconUnit.interval}
+              </div>
+              <div>
+                <strong>Timezone:</strong> ${config.reconUnit.timezone}
+              </div>
+              <div class="mt-2">
+                <a href="1-recon-unit.html" class="btn btn-outline btn-sm">Edit</a>
+              </div>
+            </div>
+          </div>
+        `;
+      }
+
+      // Source A
+      if (config.sourceA) {
+        const source = config.sourceA;
+        html += `
+          <div class="card card-compact">
+            <div class="card-header" style="background: var(--success); color: white;">
+              <h4 class="card-title" style="margin: 0;">Source A: ${source.name}</h4>
+            </div>
+            <div class="card-body">
+              <div style="margin-bottom: var(--spacing-sm);">
+                <strong>Type:</strong> ${source.type.toUpperCase()}
+              </div>
+              ${source.type === 'postgresql' ? `
+                <div style="margin-bottom: var(--spacing-sm);">
+                  <strong>Database:</strong> ${source.database}
+                </div>
+                <div style="margin-bottom: var(--spacing-sm);">
+                  <strong>Schema:</strong> ${source.schema}
+                </div>
+              ` : source.type === 'api' ? `
+                <div style="margin-bottom: var(--spacing-sm);">
+                  <strong>Base URL:</strong> ${source.baseUrl}
+                </div>
+                <div style="margin-bottom: var(--spacing-sm);">
+                  <strong>Endpoint:</strong> ${source.endpoint}
+                </div>
+              ` : `
+                <div style="margin-bottom: var(--spacing-sm);">
+                  <strong>Host:</strong> ${source.host}
+                </div>
+                <div style="margin-bottom: var(--spacing-sm);">
+                  <strong>Directory:</strong> ${source.directory}
+                </div>
+              `}
+              <div class="mt-2">
+                <a href="2-datasources.html" class="btn btn-outline btn-sm">Edit</a>
+              </div>
+            </div>
+          </div>
+        `;
+      }
+
+      // Source B
+      if (config.sourceB) {
+        const source = config.sourceB;
+        html += `
+          <div class="card card-compact">
+            <div class="card-header" style="background: var(--warning); color: white;">
+              <h4 class="card-title" style="margin: 0;">Source B: ${source.name}</h4>
+            </div>
+            <div class="card-body">
+              <div style="margin-bottom: var(--spacing-sm);">
+                <strong>Type:</strong> ${source.type.toUpperCase()}
+              </div>
+              ${source.type === 'postgresql' ? `
+                <div style="margin-bottom: var(--spacing-sm);">
+                  <strong>Database:</strong> ${source.database}
+                </div>
+                <div style="margin-bottom: var(--spacing-sm);">
+                  <strong>Schema:</strong> ${source.schema}
+                </div>
+              ` : source.type === 'api' ? `
+                <div style="margin-bottom: var(--spacing-sm);">
+                  <strong>Base URL:</strong> ${source.baseUrl}
+                </div>
+                <div style="margin-bottom: var(--spacing-sm);">
+                  <strong>Endpoint:</strong> ${source.endpoint}
+                </div>
+              ` : `
+                <div style="margin-bottom: var(--spacing-sm);">
+                  <strong>Host:</strong> ${source.host}
+                </div>
+                <div style="margin-bottom: var(--spacing-sm);">
+                  <strong>Directory:</strong> ${source.directory}
+                </div>
+              `}
+              <div class="mt-2">
+                <a href="2-datasources.html" class="btn btn-outline btn-sm">Edit</a>
+              </div>
+            </div>
+          </div>
+        `;
+      }
+
+      // Schema A
+      if (config.schemaA) {
+        const schema = config.schemaA;
+        const transformCount = schema.fields.filter(f => f.transform).length;
+        html += `
+          <div class="card card-compact">
+            <div class="card-header" style="background: var(--gray-700); color: white;">
+              <h4 class="card-title" style="margin: 0;">Schema A: ${schema.name}</h4>
+            </div>
+            <div class="card-body">
+              <div style="margin-bottom: var(--spacing-sm);">
+                <strong>Fields:</strong> ${schema.fields.length}
+              </div>
+              <div style="margin-bottom: var(--spacing-sm);">
+                <strong>Transformations:</strong> ${transformCount}
+              </div>
+              <div style="margin-bottom: var(--spacing-sm);">
+                <strong>Version:</strong> ${schema.version}
+              </div>
+              <div class="mt-2">
+                <a href="3-schema.html" class="btn btn-outline btn-sm">Edit</a>
+              </div>
+            </div>
+          </div>
+        `;
+      }
+
+      // Schema B
+      if (config.schemaB) {
+        const schema = config.schemaB;
+        const transformCount = schema.fields.filter(f => f.transform).length;
+        html += `
+          <div class="card card-compact">
+            <div class="card-header" style="background: var(--gray-700); color: white;">
+              <h4 class="card-title" style="margin: 0;">Schema B: ${schema.name}</h4>
+            </div>
+            <div class="card-body">
+              <div style="margin-bottom: var(--spacing-sm);">
+                <strong>Fields:</strong> ${schema.fields.length}
+              </div>
+              <div style="margin-bottom: var(--spacing-sm);">
+                <strong>Transformations:</strong> ${transformCount}
+              </div>
+              <div style="margin-bottom: var(--spacing-sm);">
+                <strong>Version:</strong> ${schema.version}
+              </div>
+              <div class="mt-2">
+                <a href="3-schema.html" class="btn btn-outline btn-sm">Edit</a>
+              </div>
+            </div>
+          </div>
+        `;
+      }
+
+      // Matching Rules
+      if (config.matchingRules) {
+        const rules = config.matchingRules;
+        const errorRules = rules.rules.filter(r => r.severity === 'error').length;
+        const warningRules = rules.rules.filter(r => r.severity === 'warning').length;
+        html += `
+          <div class="card card-compact">
+            <div class="card-header" style="background: var(--error); color: white;">
+              <h4 class="card-title" style="margin: 0;">Matching Rules</h4>
+            </div>
+            <div class="card-body">
+              <div style="margin-bottom: var(--spacing-sm);">
+                <strong>JOIN Conditions:</strong> ${rules.join.length}
+              </div>
+              <div style="margin-bottom: var(--spacing-sm);">
+                <strong>Validation Rules:</strong> ${rules.rules.length}
+              </div>
+              <div style="margin-bottom: var(--spacing-sm);">
+                <span class="badge badge-error">${errorRules} Errors</span>
+                <span class="badge badge-warning">${warningRules} Warnings</span>
+              </div>
+              <div class="mt-2">
+                <a href="4-rules.html" class="btn btn-outline btn-sm">Edit</a>
+              </div>
+            </div>
+          </div>
+        `;
+      }
+
+      // Reconciliation Job
+      if (config.reconciliation) {
+        const recon = config.reconciliation;
+        const enabledOutputs = [
+          recon.outputs.matched?.store,
+          recon.outputs.unmatchedLeft?.store,
+          recon.outputs.unmatchedRight?.store
+        ].filter(Boolean).length;
+
+        html += `
+          <div class="card card-compact">
+            <div class="card-header" style="background: var(--primary); color: white;">
+              <h4 class="card-title" style="margin: 0;">Reconciliation Job</h4>
+            </div>
+            <div class="card-body">
+              <div style="margin-bottom: var(--spacing-sm);">
+                <strong>Job Name:</strong> ${recon.name}
+              </div>
+              <div style="margin-bottom: var(--spacing-sm);">
+                <strong>Scheduled:</strong> ${recon.schedule ? 'Yes' : 'No'}
+              </div>
+              <div style="margin-bottom: var(--spacing-sm);">
+                <strong>Outputs Enabled:</strong> ${enabledOutputs}
+              </div>
+              <div style="margin-bottom: var(--spacing-sm);">
+                <strong>Named Queries:</strong> ${recon.queries.length}
+              </div>
+              <div class="mt-2">
+                <a href="5-reconciliation.html" class="btn btn-outline btn-sm">Edit</a>
+              </div>
+            </div>
+          </div>
+        `;
+      }
+
+      html += '</div>';
+      container.innerHTML = html;
+    }
+
+    // Generate and display YAML
+    function generateYAML() {
+      const yaml = YAMLGenerator.generateComplete(config);
+      const highlighted = YAMLGenerator.highlightYAML(yaml);
+      document.getElementById('yaml-preview').innerHTML = highlighted;
+      return yaml;
+    }
+
+    // Copy YAML to clipboard
+    function copyYAML() {
+      const yaml = YAMLGenerator.generateComplete(config);
+      App.copyToClipboard(yaml);
+    }
+
+    // Download YAML file
+    function downloadYAML() {
+      const yaml = YAMLGenerator.generateComplete(config);
+      const jobName = config.reconciliation?.name || 'reconciliation';
+      const timestamp = new Date().toISOString().split('T')[0];
+      const filename = `${jobName}-${timestamp}.yaml`;
+
+      App.downloadFile(yaml, filename);
+      App.showNotification(`YAML configuration downloaded: ${filename}`, 'success');
+    }
+
+    // Save draft
+    function saveDraft() {
+      App.showNotification('Configuration saved as draft', 'success');
+    }
+
+    // Start over
+    function startOver() {
+      if (confirm('Are you sure you want to start over? This will clear all configuration data.')) {
+        Storage.clear();
+        App.showNotification('Configuration cleared', 'info');
+        setTimeout(() => {
+          window.location.href = 'index.html';
+        }, 500);
+      }
+    }
+
+    // Validate configuration completeness
+    function validateConfiguration() {
+      const missing = [];
+
+      if (!config.reconUnit) missing.push('Reconciliation Unit');
+      if (!config.sourceA) missing.push('Source A');
+      if (!config.sourceB) missing.push('Source B');
+      if (!config.schemaA) missing.push('Schema A');
+      if (!config.schemaB) missing.push('Schema B');
+      if (!config.matchingRules) missing.push('Matching Rules');
+      if (!config.reconciliation) missing.push('Reconciliation Job');
+
+      if (missing.length > 0) {
+        const container = document.getElementById('summary-container');
+        container.innerHTML = `
+          <div class="alert alert-warning">
+            <div class="alert-title">Incomplete Configuration</div>
+            The following sections are missing or incomplete:
+            <ul style="margin-top: var(--spacing-md); margin-left: var(--spacing-lg);">
+              ${missing.map(item => `<li>${item}</li>`).join('')}
+            </ul>
+            <div class="mt-3">
+              <a href="1-recon-unit.html" class="btn btn-primary">Complete Configuration</a>
+            </div>
+          </div>
+        `;
+        return false;
+      }
+
+      return true;
+    }
+
+    // Initialize
+    if (validateConfiguration()) {
+      renderSummary();
+      generateYAML();
+    } else {
+      document.getElementById('yaml-preview').innerHTML = '<span style="color: var(--warning);">Configuration incomplete. Please complete all steps before generating YAML.</span>';
+    }
+
+    // Override validation
+    App.validateCurrentStep = function() {
+      return true; // No validation needed on review page
+    };
+  </script>
+</body>
+</html>
