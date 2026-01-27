@@ -1,0 +1,1070 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Reports - Reconciliation Engine</title>
+  <link rel="stylesheet" href="css/main.css">
+  <link rel="stylesheet" href="css/components.css">
+  <link rel="stylesheet" href="css/steps.css">
+  <link rel="stylesheet" href="css/reports.css">
+</head>
+<body class="reports-page">
+  <!-- Header -->
+  <header class="site-header">
+    <div class="container">
+      <div class="header-content">
+        <div class="logo">
+          <div class="logo-icon">R</div>
+          <span>Reconciliation Engine</span>
+        </div>
+        <nav>
+          <ul class="main-nav">
+            <li><a href="index.html">Create</a></li>
+            <li><a href="#">Jobs</a></li>
+            <li><a href="7-reports.html" class="active">Results</a></li>
+            <li><a href="#">Settings</a></li>
+          </ul>
+        </nav>
+      </div>
+    </div>
+  </header>
+
+  <!-- Main Content -->
+  <main class="main-content">
+    <div class="container-wide">
+      <!-- Page Header -->
+      <div class="page-header mb-4">
+        <h1 class="page-title">Reconciliation Reports</h1>
+        <p class="page-subtitle">View and analyze reconciliation execution results</p>
+      </div>
+
+      <!-- Run History -->
+      <div class="card mb-4">
+        <div class="card-header">
+          <div style="display: flex; justify-content: space-between; align-items: center;">
+            <div>
+              <h2 class="card-title">Run History</h2>
+              <p class="card-subtitle">Select a run to view detailed results</p>
+            </div>
+            <button class="btn btn-primary" onclick="window.location.href='6-run.html'">
+              New Run
+            </button>
+          </div>
+        </div>
+        <div class="card-body" style="padding: 0;">
+          <div id="run-history-container">
+            <!-- Will be populated by JS -->
+          </div>
+        </div>
+      </div>
+
+      <!-- Report Details (shown when a run is selected) -->
+      <div id="report-details" style="display: none;">
+        <!-- Execution Summary -->
+        <div class="card mb-4">
+          <div class="card-header">
+            <h2 class="card-title">Execution Summary</h2>
+            <p class="card-subtitle" id="report-subtitle">-</p>
+          </div>
+          <div class="card-body">
+            <div class="summary-cards-simple" id="summary-cards">
+              <!-- Will be populated by JS -->
+            </div>
+          </div>
+        </div>
+
+        <!-- Comparison Section (shown for patch runs) -->
+        <div class="card mb-4" id="comparison-section" style="display: none;">
+          <div class="card-header">
+            <h2 class="card-title">Comparison vs Base Run</h2>
+            <p class="card-subtitle" id="comparison-subtitle">Comparing with previous run</p>
+          </div>
+          <div class="card-body" id="comparison-container">
+            <!-- Will be populated by JS -->
+          </div>
+        </div>
+
+        <!-- Data Sources with Patches -->
+        <div class="card mb-4">
+          <div class="card-header">
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+              <div>
+                <h2 class="card-title">Data Sources</h2>
+                <p class="card-subtitle" id="datasources-subtitle">Add patches to re-run with additional data</p>
+              </div>
+              <button class="btn btn-primary" id="runWithPatchesBtn" onclick="runWithPatches()" style="display: none;">
+                Run with Patches
+              </button>
+            </div>
+          </div>
+          <div class="card-body" id="datasources-container">
+            <!-- Will be populated by JS -->
+          </div>
+        </div>
+
+        <!-- Stage Results -->
+        <div class="card mb-4">
+          <div class="card-header">
+            <h2 class="card-title">Stage Results</h2>
+            <p class="card-subtitle">Download reconciliation outputs</p>
+          </div>
+          <div class="card-body" id="stage-results">
+            <!-- Will be populated by JS -->
+          </div>
+        </div>
+      </div>
+
+      <!-- Empty State (shown when no runs) -->
+      <div class="card" id="empty-state" style="display: none;">
+        <div class="card-body text-center" style="padding: var(--spacing-xxl);">
+          <div class="empty-icon mb-3">
+            <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+              <path d="M9 12h6M9 16h6M17 21H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+            </svg>
+          </div>
+          <h3 class="mb-2">No Reconciliation Results</h3>
+          <p class="text-gray mb-4">Run a reconciliation to see results here</p>
+          <button class="btn btn-primary" onclick="window.location.href='6-run.html'">
+            Run Reconciliation
+          </button>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <!-- Patch Modal -->
+  <div class="modal-overlay" id="patch-modal" style="display: none;">
+    <div class="modal" style="max-width: 600px;">
+      <div class="modal-header">
+        <h3 class="modal-title">Add Patch</h3>
+        <button class="modal-close" onclick="closePatchModal()">&times;</button>
+      </div>
+      <div class="modal-body" id="patch-modal-body">
+        <!-- Will be populated by JS -->
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="closePatchModal()">Cancel</button>
+        <button class="btn btn-primary" onclick="savePatch()">Add Patch</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Scripts -->
+  <script src="js/storage.js"></script>
+  <script src="js/recon-data-generator.js"></script>
+  <script src="js/recon-runner.js"></script>
+  <script src="js/app.js"></script>
+  <script>
+    // State
+    let currentReport = null;
+    let patches = {}; // { datasourceId: [patch, ...] }
+    let currentPatchDatasource = null;
+    let config = null;
+
+    // Initialize page
+    function initPage() {
+      config = Storage.get();
+      loadRunHistory();
+
+      // Check URL for specific run ID
+      const urlParams = new URLSearchParams(window.location.search);
+      const runId = urlParams.get('runId');
+      if (runId) {
+        selectRun(runId);
+      }
+
+      // Load saved patches
+      loadPatches();
+    }
+
+    // Load run history from storage
+    function loadRunHistory() {
+      const results = getExecutionResults();
+      const container = document.getElementById('run-history-container');
+      const emptyState = document.getElementById('empty-state');
+      const reportDetails = document.getElementById('report-details');
+
+      if (!results || results.length === 0) {
+        container.innerHTML = '';
+        emptyState.style.display = 'block';
+        reportDetails.style.display = 'none';
+        return;
+      }
+
+      emptyState.style.display = 'none';
+
+      // Build history table
+      let html = `
+        <table class="run-history-table">
+          <thead>
+            <tr>
+              <th>Run ID</th>
+              <th>Job Name</th>
+              <th>Date Range</th>
+              <th>Status</th>
+              <th>Match Rate</th>
+              <th>Duration</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+      `;
+
+      results.forEach(result => {
+        const startDate = new Date(result.request?.datetimeRange?.start || result.timing?.startedAt);
+        const dateStr = startDate.toLocaleDateString();
+
+        html += `
+          <tr onclick="selectRun('${result.runId}')" class="${currentReport?.runId === result.runId ? 'selected' : ''}">
+            <td><code>${result.runId.slice(0, 20)}...</code></td>
+            <td>${escapeHtml(result.configName || 'Unnamed')}</td>
+            <td>${dateStr}</td>
+            <td>
+              <span class="status-badge ${result.status}">${result.status}</span>
+            </td>
+            <td>${result.summary?.matchRate || 0}%</td>
+            <td>${formatDuration(result.timing?.durationMs || 0)}</td>
+            <td>
+              <button class="btn btn-outline btn-sm" onclick="event.stopPropagation(); selectRun('${result.runId}')">
+                View
+              </button>
+            </td>
+          </tr>
+        `;
+      });
+
+      html += `
+          </tbody>
+        </table>
+      `;
+
+      container.innerHTML = html;
+    }
+
+    // Get execution results from storage
+    function getExecutionResults() {
+      try {
+        const data = localStorage.getItem('execution_results');
+        return data ? JSON.parse(data) : [];
+      } catch (e) {
+        console.error('Error loading results:', e);
+        return [];
+      }
+    }
+
+    // Select a run to view
+    function selectRun(runId) {
+      const results = getExecutionResults();
+      const report = results.find(r => r.runId === runId);
+
+      if (!report) {
+        App.showNotification('Report not found', 'error');
+        return;
+      }
+
+      currentReport = report;
+
+      // Update URL
+      window.history.replaceState({}, '', `7-reports.html?runId=${runId}`);
+
+      // Reload history to update selection
+      loadRunHistory();
+
+      // Show report details
+      document.getElementById('report-details').style.display = 'block';
+
+      renderReport(report);
+    }
+
+    // Render complete report
+    function renderReport(report) {
+      renderSubtitle(report);
+      renderSummaryCards(report);
+      renderComparison(report);
+      renderDatasources(report);
+      renderStageResults(report);
+    }
+
+    // Render report subtitle
+    function renderSubtitle(report) {
+      const subtitle = document.getElementById('report-subtitle');
+      const startDate = new Date(report.timing?.startedAt);
+      subtitle.textContent = `Run ID: ${report.runId} | Executed: ${startDate.toLocaleString()}`;
+    }
+
+    // Render simplified summary cards (only 3)
+    function renderSummaryCards(report) {
+      const container = document.getElementById('summary-cards');
+      const summary = report.summary || {};
+
+      container.innerHTML = `
+        <div class="summary-card">
+          <div class="summary-card-value">${formatDuration(report.timing?.durationMs || 0)}</div>
+          <div class="summary-card-label">Duration</div>
+        </div>
+        <div class="summary-card success">
+          <div class="summary-card-value">${(summary.totalMatched || 0).toLocaleString()}</div>
+          <div class="summary-card-label">Matched</div>
+        </div>
+        <div class="summary-card primary">
+          <div class="summary-card-value">${summary.matchRate || 0}%</div>
+          <div class="summary-card-label">Match Rate</div>
+        </div>
+      `;
+    }
+
+    // Render comparison section for patch runs
+    function renderComparison(report) {
+      const comparisonSection = document.getElementById('comparison-section');
+      const container = document.getElementById('comparison-container');
+
+      // Check if this is a patch run
+      if (!report.isPatchRun) {
+        comparisonSection.style.display = 'none';
+        return;
+      }
+
+      // Find base run and previous run
+      const results = getExecutionResults();
+      const baseRun = report.baseRunId ? results.find(r => r.runId === report.baseRunId) : null;
+      const previousRun = report.previousRunId ? results.find(r => r.runId === report.previousRunId) : null;
+
+      // Need at least one comparison to show the section
+      if (!baseRun && !previousRun) {
+        comparisonSection.style.display = 'none';
+        return;
+      }
+
+      comparisonSection.style.display = 'block';
+
+      // Update subtitle
+      const subtitle = document.getElementById('comparison-subtitle');
+      subtitle.textContent = 'Match performance comparison';
+
+      const currentSummary = report.summary || {};
+      let html = '<div class="comparison-panels">';
+
+      // Comparison vs Base Run
+      if (baseRun) {
+        const baseSummary = baseRun.summary || {};
+        const baseMatchedDiff = (currentSummary.totalMatched || 0) - (baseSummary.totalMatched || 0);
+        const baseMatchRateDiff = parseFloat(currentSummary.matchRate || 0) - parseFloat(baseSummary.matchRate || 0);
+        const baseDate = new Date(baseRun.timing?.startedAt);
+
+        html += `
+          <div class="comparison-panel">
+            <div class="comparison-panel-header">
+              <span class="comparison-panel-title">vs Base Run</span>
+              <span class="comparison-panel-date">${baseDate.toLocaleDateString()}</span>
+            </div>
+            <div class="comparison-metrics">
+              <div class="comparison-metric">
+                <span class="comparison-metric-label">Matched</span>
+                <div class="comparison-metric-values">
+                  <span class="comparison-metric-base">${(baseSummary.totalMatched || 0).toLocaleString()}</span>
+                  <span class="comparison-metric-arrow">→</span>
+                  <span class="comparison-metric-current">${(currentSummary.totalMatched || 0).toLocaleString()}</span>
+                  <span class="comparison-metric-diff ${baseMatchedDiff >= 0 ? 'positive' : 'negative'}">
+                    ${baseMatchedDiff >= 0 ? '+' : ''}${baseMatchedDiff.toLocaleString()}
+                  </span>
+                </div>
+              </div>
+              <div class="comparison-metric">
+                <span class="comparison-metric-label">Match Rate</span>
+                <div class="comparison-metric-values">
+                  <span class="comparison-metric-base">${baseSummary.matchRate || 0}%</span>
+                  <span class="comparison-metric-arrow">→</span>
+                  <span class="comparison-metric-current">${currentSummary.matchRate || 0}%</span>
+                  <span class="comparison-metric-diff ${baseMatchRateDiff >= 0 ? 'positive' : 'negative'}">
+                    ${baseMatchRateDiff >= 0 ? '+' : ''}${baseMatchRateDiff.toFixed(1)}%
+                  </span>
+                </div>
+              </div>
+            </div>
+            <div class="comparison-panel-footer">
+              <button class="btn btn-outline btn-sm" onclick="selectRun('${baseRun.runId}')">View Base Run</button>
+            </div>
+          </div>
+        `;
+      }
+
+      // Comparison vs Previous Patched Run
+      if (previousRun && previousRun.runId !== baseRun?.runId) {
+        const prevSummary = previousRun.summary || {};
+        const prevMatchedDiff = (currentSummary.totalMatched || 0) - (prevSummary.totalMatched || 0);
+        const prevMatchRateDiff = parseFloat(currentSummary.matchRate || 0) - parseFloat(prevSummary.matchRate || 0);
+        const prevDate = new Date(previousRun.timing?.startedAt);
+
+        html += `
+          <div class="comparison-panel">
+            <div class="comparison-panel-header">
+              <span class="comparison-panel-title">vs Previous Run</span>
+              <span class="comparison-panel-date">${prevDate.toLocaleDateString()}</span>
+            </div>
+            <div class="comparison-metrics">
+              <div class="comparison-metric">
+                <span class="comparison-metric-label">Matched</span>
+                <div class="comparison-metric-values">
+                  <span class="comparison-metric-base">${(prevSummary.totalMatched || 0).toLocaleString()}</span>
+                  <span class="comparison-metric-arrow">→</span>
+                  <span class="comparison-metric-current">${(currentSummary.totalMatched || 0).toLocaleString()}</span>
+                  <span class="comparison-metric-diff ${prevMatchedDiff >= 0 ? 'positive' : 'negative'}">
+                    ${prevMatchedDiff >= 0 ? '+' : ''}${prevMatchedDiff.toLocaleString()}
+                  </span>
+                </div>
+              </div>
+              <div class="comparison-metric">
+                <span class="comparison-metric-label">Match Rate</span>
+                <div class="comparison-metric-values">
+                  <span class="comparison-metric-base">${prevSummary.matchRate || 0}%</span>
+                  <span class="comparison-metric-arrow">→</span>
+                  <span class="comparison-metric-current">${currentSummary.matchRate || 0}%</span>
+                  <span class="comparison-metric-diff ${prevMatchRateDiff >= 0 ? 'positive' : 'negative'}">
+                    ${prevMatchRateDiff >= 0 ? '+' : ''}${prevMatchRateDiff.toFixed(1)}%
+                  </span>
+                </div>
+              </div>
+            </div>
+            <div class="comparison-panel-footer">
+              <button class="btn btn-outline btn-sm" onclick="selectRun('${previousRun.runId}')">View Previous Run</button>
+            </div>
+          </div>
+        `;
+      }
+
+      html += '</div>';
+      container.innerHTML = html;
+    }
+
+    // Render datasources with patches
+    function renderDatasources(report) {
+      const container = document.getElementById('datasources-container');
+      const subtitle = document.getElementById('datasources-subtitle');
+      const datasources = config.dataSources || [];
+
+      // Fallback to legacy format
+      if (datasources.length === 0) {
+        if (config.sourceA) datasources.push({ ...config.sourceA, id: 'source_a' });
+        if (config.sourceB) datasources.push({ ...config.sourceB, id: 'source_b' });
+      }
+
+      if (datasources.length === 0) {
+        container.innerHTML = '<div class="text-gray">No data sources configured</div>';
+        return;
+      }
+
+      // Check if this is a patch run
+      const isPatchRun = report.isPatchRun === true;
+      const appliedPatches = isPatchRun ? (report.patches || {}) : {};
+
+      // Update subtitle
+      if (isPatchRun) {
+        subtitle.textContent = 'Add more patches or re-run with existing patches';
+      } else {
+        subtitle.textContent = 'Add patches to re-run with additional data';
+      }
+
+      let html = '';
+
+      datasources.forEach(ds => {
+        const dsAppliedPatches = appliedPatches[ds.id] || [];
+        const dsNewPatches = patches[ds.id] || [];
+        const typeLabel = (ds.type || 'unknown').toUpperCase();
+        const connectionInfo = getConnectionInfo(ds);
+        const hasAppliedPatches = dsAppliedPatches.length > 0;
+
+        html += `
+          <div class="datasource-card ${hasAppliedPatches ? 'has-patches' : ''}">
+            <div class="datasource-header">
+              <div class="datasource-info">
+                <span class="datasource-name">${escapeHtml(ds.name)}</span>
+                <span class="datasource-type">${typeLabel}</span>
+                ${hasAppliedPatches ? '<span class="patch-badge">Patched</span>' : ''}
+              </div>
+              <button class="btn btn-outline btn-sm" onclick="openPatchModal('${ds.id}')">
+                + Patch
+              </button>
+            </div>
+            <div class="datasource-connection">
+              ${connectionInfo}
+            </div>
+            ${hasAppliedPatches ? `
+              <div class="patches-list readonly">
+                <div class="patches-section-label">Applied Patches</div>
+                ${dsAppliedPatches.map((patch) => `
+                  <div class="patch-item readonly">
+                    <div class="patch-info">
+                      <span class="patch-name">${escapeHtml(patch.name)}</span>
+                      <span class="patch-value">${escapeHtml(getPatchSummary(patch, ds.type))}</span>
+                    </div>
+                  </div>
+                `).join('')}
+              </div>
+            ` : ''}
+            ${dsNewPatches.length > 0 ? `
+              <div class="patches-list new-patches">
+                <div class="patches-section-label">New Patches</div>
+                ${dsNewPatches.map((patch, idx) => `
+                  <div class="patch-item">
+                    <div class="patch-info">
+                      <span class="patch-name">${escapeHtml(patch.name)}</span>
+                      <span class="patch-value">${escapeHtml(getPatchSummary(patch, ds.type))}</span>
+                    </div>
+                    <button class="patch-remove-btn" onclick="removePatch('${ds.id}', ${idx})" title="Remove patch">
+                      &times;
+                    </button>
+                  </div>
+                `).join('')}
+              </div>
+            ` : ''}
+          </div>
+        `;
+      });
+
+      container.innerHTML = html;
+
+      // Show Run with Patches button if there are new patches OR if this is a patch run (to re-run)
+      const hasNewPatches = Object.values(patches).some(p => p.length > 0);
+      const hasAppliedPatches = Object.values(appliedPatches).some(p => p.length > 0);
+
+      const runBtn = document.getElementById('runWithPatchesBtn');
+      if (hasNewPatches || hasAppliedPatches) {
+        runBtn.style.display = 'block';
+        runBtn.textContent = hasNewPatches ? 'Run with Patches' : 'Re-run with Patches';
+      } else {
+        runBtn.style.display = 'none';
+      }
+    }
+
+    // Get connection info string for display
+    function getConnectionInfo(ds) {
+      const type = (ds.type || '').toLowerCase();
+
+      if (type === 'postgresql' || type === 'database') {
+        const conn = ds.connection || {};
+        return `<span class="connection-detail">${escapeHtml(conn.host || 'localhost')}:${conn.port || 5432}/${escapeHtml(conn.database || '')}</span>`;
+      }
+
+      if (type === 'api') {
+        const conn = ds.connection || {};
+        return `<span class="connection-detail">${escapeHtml(conn.base_url || '')}${escapeHtml(conn.endpoint || '')}</span>`;
+      }
+
+      if (type === 'sftp') {
+        const conn = ds.connection || {};
+        const fetch = ds.fetch || {};
+        return `<span class="connection-detail">${escapeHtml(conn.host || '')}:${escapeHtml(fetch.directory || '/')}</span>`;
+      }
+
+      return '<span class="connection-detail">-</span>';
+    }
+
+    // Get patch summary for display
+    function getPatchSummary(patch, dsType) {
+      const type = (dsType || '').toLowerCase();
+
+      if (type === 'postgresql' || type === 'database') {
+        return patch.query ? patch.query.substring(0, 50) + (patch.query.length > 50 ? '...' : '') : '-';
+      }
+
+      if (type === 'api') {
+        return patch.endpoint || JSON.stringify(patch.queryParams || {}).substring(0, 50);
+      }
+
+      if (type === 'sftp') {
+        return patch.filePattern || '-';
+      }
+
+      return '-';
+    }
+
+    // Render stage results with download buttons
+    function renderStageResults(report) {
+      const container = document.getElementById('stage-results');
+      const stages = report.stages || [];
+
+      if (stages.length === 0) {
+        container.innerHTML = '<div class="text-gray">No stage data available</div>';
+        return;
+      }
+
+      let html = '';
+
+      stages.forEach((stage, index) => {
+        const matched = stage.matching?.totalMatched || 0;
+        const unmatchedLeft = stage.matching?.unmatchedLeft || 0;
+        const unmatchedRight = stage.matching?.unmatchedRight || 0;
+        const leftRecords = stage.matching?.leftRecords || (matched + unmatchedLeft);
+        const rightRecords = stage.matching?.rightRecords || (matched + unmatchedRight);
+        const totalRecords = leftRecords + rightRecords;
+        const matchRate = totalRecords > 0 ? ((matched * 2) / totalRecords * 100).toFixed(1) : 0;
+
+        html += `
+          <div class="stage-result-card">
+            <div class="stage-result-header">
+              <div>
+                <h4 style="margin: 0;">Stage ${index + 1}: ${escapeHtml(stage.stageName)}</h4>
+                <span style="font-size: 0.85rem; opacity: 0.9;">Mode: ${stage.mode || 'one_to_one'}</span>
+              </div>
+              <span class="stage-duration">${formatDuration(stage.timing?.durationMs || 0)}</span>
+            </div>
+            <div class="stage-result-body">
+              <!-- Stage Metrics -->
+              <div class="stage-metrics mb-3">
+                <div class="stage-metrics-grid">
+                  <div class="stage-metric">
+                    <span class="stage-metric-value">${leftRecords.toLocaleString()}</span>
+                    <span class="stage-metric-label">Left Records</span>
+                  </div>
+                  <div class="stage-metric">
+                    <span class="stage-metric-value">${rightRecords.toLocaleString()}</span>
+                    <span class="stage-metric-label">Right Records</span>
+                  </div>
+                  <div class="stage-metric success">
+                    <span class="stage-metric-value">${matched.toLocaleString()}</span>
+                    <span class="stage-metric-label">Matched</span>
+                  </div>
+                  <div class="stage-metric warning">
+                    <span class="stage-metric-value">${unmatchedLeft.toLocaleString()}</span>
+                    <span class="stage-metric-label">Unmatched Left</span>
+                  </div>
+                  <div class="stage-metric error">
+                    <span class="stage-metric-value">${unmatchedRight.toLocaleString()}</span>
+                    <span class="stage-metric-label">Unmatched Right</span>
+                  </div>
+                  <div class="stage-metric primary">
+                    <span class="stage-metric-value">${matchRate}%</span>
+                    <span class="stage-metric-label">Match Rate</span>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Download Buttons -->
+              <div class="download-section">
+                <h5 class="download-section-title">Downloads</h5>
+                <div class="download-btn-group">
+                  <button class="download-btn success" onclick="downloadResults('${stage.stageId}', 'matched', ${matched})">
+                    <span class="download-icon">&#8595;</span>
+                    <span class="download-label">Matched</span>
+                    <span class="download-count">${matched.toLocaleString()}</span>
+                  </button>
+                  <button class="download-btn warning" onclick="downloadResults('${stage.stageId}', 'unmatched_left', ${unmatchedLeft})">
+                    <span class="download-icon">&#8595;</span>
+                    <span class="download-label">Unmatched Left</span>
+                    <span class="download-count">${unmatchedLeft.toLocaleString()}</span>
+                  </button>
+                  <button class="download-btn error" onclick="downloadResults('${stage.stageId}', 'unmatched_right', ${unmatchedRight})">
+                    <span class="download-icon">&#8595;</span>
+                    <span class="download-label">Unmatched Right</span>
+                    <span class="download-count">${unmatchedRight.toLocaleString()}</span>
+                  </button>
+                </div>
+              </div>
+
+              ${stage.resultQueries && stage.resultQueries.length > 0 ? `
+                <div class="download-section mt-3">
+                  <h5 class="download-section-title">Result Queries</h5>
+                  <div class="download-btn-group">
+                    ${stage.resultQueries.map(q => `
+                      <button class="download-btn query" onclick="downloadQueryResults('${stage.stageId}', '${q.queryName}', ${q.recordCount || 0})">
+                        <span class="download-icon">&#8595;</span>
+                        <span class="download-label">${escapeHtml(q.queryName)}</span>
+                        <span class="download-count">${(q.recordCount || 0).toLocaleString()}</span>
+                      </button>
+                    `).join('')}
+                  </div>
+                </div>
+              ` : ''}
+            </div>
+          </div>
+        `;
+      });
+
+      container.innerHTML = html;
+    }
+
+    // Download results as CSV
+    function downloadResults(stageId, type, count) {
+      if (count === 0) {
+        App.showNotification('No records to download', 'info');
+        return;
+      }
+
+      // Generate mock CSV data
+      const csv = generateMockCSV(type, count);
+      const filename = `${currentReport.runId}_${stageId}_${type}.csv`;
+
+      App.downloadFile(csv, filename, 'text/csv');
+      App.showNotification(`Downloaded ${count.toLocaleString()} ${type.replace('_', ' ')} records`, 'success');
+    }
+
+    // Download query results as CSV
+    function downloadQueryResults(stageId, queryName, count) {
+      if (count === 0) {
+        App.showNotification('No records to download', 'info');
+        return;
+      }
+
+      // Generate mock CSV data
+      const csv = generateMockCSV(queryName, count);
+      const filename = `${currentReport.runId}_${stageId}_${queryName}.csv`;
+
+      App.downloadFile(csv, filename, 'text/csv');
+      App.showNotification(`Downloaded ${count.toLocaleString()} records for ${queryName}`, 'success');
+    }
+
+    // Generate mock CSV data
+    function generateMockCSV(type, count) {
+      const headers = ['transaction_id', 'amount', 'currency', 'status', 'timestamp', 'reference'];
+      let csv = headers.join(',') + '\n';
+
+      const sampleCount = Math.min(count, 100); // Limit to 100 rows for demo
+      for (let i = 0; i < sampleCount; i++) {
+        const row = [
+          `TXN${String(i + 1).padStart(8, '0')}`,
+          (Math.random() * 9990 + 10).toFixed(2),
+          ['USD', 'EUR', 'GBP'][Math.floor(Math.random() * 3)],
+          ['COMPLETED', 'PENDING', 'SETTLED'][Math.floor(Math.random() * 3)],
+          new Date().toISOString(),
+          `REF${String(i + 1).padStart(6, '0')}`
+        ];
+        csv += row.join(',') + '\n';
+      }
+
+      return csv;
+    }
+
+    // ===== PATCH FUNCTIONALITY =====
+
+    // Load patches from storage
+    function loadPatches() {
+      try {
+        const data = localStorage.getItem('report_patches');
+        patches = data ? JSON.parse(data) : {};
+      } catch (e) {
+        patches = {};
+      }
+    }
+
+    // Save patches to storage
+    function savePatches() {
+      localStorage.setItem('report_patches', JSON.stringify(patches));
+    }
+
+    // Open patch modal
+    function openPatchModal(datasourceId) {
+      currentPatchDatasource = datasourceId;
+      const ds = getDatasourceById(datasourceId);
+
+      if (!ds) {
+        App.showNotification('Datasource not found', 'error');
+        return;
+      }
+
+      const type = (ds.type || '').toLowerCase();
+      const modalBody = document.getElementById('patch-modal-body');
+
+      let html = `
+        <input type="hidden" id="patch-ds-id" value="${datasourceId}">
+        <input type="hidden" id="patch-ds-type" value="${type}">
+
+        <div class="form-group mb-3">
+          <label class="form-label">Patch Name</label>
+          <input type="text" class="form-control" id="patch-name" placeholder="e.g., Patch 1" value="Patch ${(patches[datasourceId]?.length || 0) + 1}">
+        </div>
+
+        <div class="readonly-section mb-3">
+          <h5 class="section-subtitle">Inherited Configuration (Read-only)</h5>
+          ${renderReadonlyConfig(ds)}
+        </div>
+
+        <div class="editable-section">
+          <h5 class="section-subtitle">Patch Configuration</h5>
+          ${renderEditableFields(ds, type)}
+        </div>
+      `;
+
+      modalBody.innerHTML = html;
+      document.getElementById('patch-modal').style.display = 'flex';
+    }
+
+    // Close patch modal
+    function closePatchModal() {
+      document.getElementById('patch-modal').style.display = 'none';
+      currentPatchDatasource = null;
+    }
+
+    // Get datasource by ID
+    function getDatasourceById(id) {
+      const datasources = config.dataSources || [];
+      let ds = datasources.find(d => d.id === id);
+
+      if (!ds) {
+        if (id === 'source_a' && config.sourceA) ds = { ...config.sourceA, id: 'source_a' };
+        if (id === 'source_b' && config.sourceB) ds = { ...config.sourceB, id: 'source_b' };
+      }
+
+      return ds;
+    }
+
+    // Render read-only config fields
+    function renderReadonlyConfig(ds) {
+      const type = (ds.type || '').toLowerCase();
+      const conn = ds.connection || {};
+
+      if (type === 'postgresql' || type === 'database') {
+        return `
+          <div class="readonly-field">
+            <span class="field-label">Host:</span>
+            <span class="field-value">${escapeHtml(conn.host || 'localhost')}:${conn.port || 5432}</span>
+          </div>
+          <div class="readonly-field">
+            <span class="field-label">Database:</span>
+            <span class="field-value">${escapeHtml(conn.database || '-')}</span>
+          </div>
+          <div class="readonly-field">
+            <span class="field-label">Schema:</span>
+            <span class="field-value">${escapeHtml(conn.schema || 'public')}</span>
+          </div>
+          <div class="readonly-field">
+            <span class="field-label">Username:</span>
+            <span class="field-value">${escapeHtml(conn.username || '-')}</span>
+          </div>
+        `;
+      }
+
+      if (type === 'api') {
+        return `
+          <div class="readonly-field">
+            <span class="field-label">Base URL:</span>
+            <span class="field-value">${escapeHtml(conn.base_url || '-')}</span>
+          </div>
+          <div class="readonly-field">
+            <span class="field-label">Auth Type:</span>
+            <span class="field-value">${escapeHtml(conn.auth_type || 'none')}</span>
+          </div>
+          <div class="readonly-field">
+            <span class="field-label">Timeout:</span>
+            <span class="field-value">${conn.timeout_seconds || 60}s</span>
+          </div>
+        `;
+      }
+
+      if (type === 'sftp') {
+        const fetch = ds.fetch || {};
+        return `
+          <div class="readonly-field">
+            <span class="field-label">Host:</span>
+            <span class="field-value">${escapeHtml(conn.host || '-')}:${conn.port || 22}</span>
+          </div>
+          <div class="readonly-field">
+            <span class="field-label">Username:</span>
+            <span class="field-value">${escapeHtml(conn.username || '-')}</span>
+          </div>
+          <div class="readonly-field">
+            <span class="field-label">Directory:</span>
+            <span class="field-value">${escapeHtml(fetch.directory || '/')}</span>
+          </div>
+          <div class="readonly-field">
+            <span class="field-label">Encoding:</span>
+            <span class="field-value">${escapeHtml(fetch.encoding || 'UTF-8')}</span>
+          </div>
+        `;
+      }
+
+      return '<div class="text-gray">No configuration</div>';
+    }
+
+    // Render editable fields based on type
+    function renderEditableFields(ds, type) {
+      if (type === 'postgresql' || type === 'database') {
+        return `
+          <div class="form-group">
+            <label class="form-label">Query (SQL to fetch patch rows)</label>
+            <textarea class="form-control" id="patch-query" rows="4" placeholder="SELECT * FROM patches WHERE processed_date = \${date}"></textarea>
+            <small class="form-hint">Use \${date}, \${start_date}, \${end_date} for date parameters</small>
+          </div>
+        `;
+      }
+
+      if (type === 'api') {
+        const conn = ds.connection || {};
+        return `
+          <div class="form-group mb-3">
+            <label class="form-label">Endpoint (optional override)</label>
+            <input type="text" class="form-control" id="patch-endpoint" placeholder="${escapeHtml(conn.endpoint || '/api/patches')}">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Query Parameters (JSON)</label>
+            <textarea class="form-control" id="patch-query-params" rows="3" placeholder='{"filter": "patches_only"}'></textarea>
+          </div>
+        `;
+      }
+
+      if (type === 'sftp') {
+        return `
+          <div class="form-group">
+            <label class="form-label">File Pattern</label>
+            <input type="text" class="form-control" id="patch-file-pattern" placeholder="patches_*.csv">
+            <small class="form-hint">Use * for wildcard matching</small>
+          </div>
+        `;
+      }
+
+      return '<div class="text-gray">No editable fields for this type</div>';
+    }
+
+    // Save patch
+    function savePatch() {
+      const dsId = document.getElementById('patch-ds-id').value;
+      const dsType = document.getElementById('patch-ds-type').value;
+      const name = document.getElementById('patch-name').value.trim();
+
+      if (!name) {
+        App.showNotification('Please enter a patch name', 'warning');
+        return;
+      }
+
+      const patch = {
+        id: 'patch_' + Date.now(),
+        datasourceId: dsId,
+        name: name,
+        createdAt: new Date().toISOString()
+      };
+
+      // Get type-specific values
+      if (dsType === 'postgresql' || dsType === 'database') {
+        const query = document.getElementById('patch-query').value.trim();
+        if (!query) {
+          App.showNotification('Please enter a query', 'warning');
+          return;
+        }
+        patch.query = query;
+      }
+
+      if (dsType === 'api') {
+        patch.endpoint = document.getElementById('patch-endpoint').value.trim() || null;
+        const paramsStr = document.getElementById('patch-query-params').value.trim();
+        if (paramsStr) {
+          try {
+            patch.queryParams = JSON.parse(paramsStr);
+          } catch (e) {
+            App.showNotification('Invalid JSON for query parameters', 'error');
+            return;
+          }
+        }
+      }
+
+      if (dsType === 'sftp') {
+        const pattern = document.getElementById('patch-file-pattern').value.trim();
+        if (!pattern) {
+          App.showNotification('Please enter a file pattern', 'warning');
+          return;
+        }
+        patch.filePattern = pattern;
+      }
+
+      // Add patch to list
+      if (!patches[dsId]) {
+        patches[dsId] = [];
+      }
+      patches[dsId].push(patch);
+
+      savePatches();
+      closePatchModal();
+
+      // Re-render datasources
+      if (currentReport) {
+        renderDatasources(currentReport);
+      }
+
+      App.showNotification('Patch added successfully', 'success');
+    }
+
+    // Remove patch
+    function removePatch(dsId, index) {
+      if (patches[dsId]) {
+        patches[dsId].splice(index, 1);
+        if (patches[dsId].length === 0) {
+          delete patches[dsId];
+        }
+        savePatches();
+
+        if (currentReport) {
+          renderDatasources(currentReport);
+        }
+      }
+    }
+
+    // Run with patches
+    async function runWithPatches() {
+      // Combine applied patches with new patches
+      const appliedPatches = currentReport?.patches || {};
+      const combinedPatches = {};
+
+      // Start with applied patches
+      for (const [dsId, dsPatches] of Object.entries(appliedPatches)) {
+        combinedPatches[dsId] = [...dsPatches];
+      }
+
+      // Add new patches
+      for (const [dsId, dsPatches] of Object.entries(patches)) {
+        if (!combinedPatches[dsId]) {
+          combinedPatches[dsId] = [];
+        }
+        combinedPatches[dsId].push(...dsPatches);
+      }
+
+      const hasPatches = Object.values(combinedPatches).some(p => p.length > 0);
+      if (!hasPatches) {
+        App.showNotification('No patches configured', 'warning');
+        return;
+      }
+
+      // Navigate to run page with combined patches
+      const patchData = encodeURIComponent(JSON.stringify(combinedPatches));
+      let url = `6-run.html?patches=${patchData}`;
+
+      // Use the original base run ID if this is a patch run, otherwise use current run
+      if (currentReport) {
+        const baseRunId = currentReport.baseRunId || currentReport.runId;
+        url += `&baseRunId=${baseRunId}`;
+
+        // Current report becomes the previous run
+        url += `&previousRunId=${currentReport.runId}`;
+      }
+
+      window.location.href = url;
+    }
+
+    // Format duration
+    function formatDuration(ms) {
+      if (!ms || ms < 1000) {
+        return (ms || 0) + 'ms';
+      }
+      const seconds = Math.floor(ms / 1000);
+      if (seconds < 60) {
+        return seconds + '.' + Math.floor((ms % 1000) / 100) + 's';
+      }
+      const minutes = Math.floor(seconds / 60);
+      const remainingSeconds = seconds % 60;
+      return minutes + 'm ' + remainingSeconds + 's';
+    }
+
+    // Escape HTML
+    function escapeHtml(str) {
+      if (!str) return '';
+      return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+    }
+
+    // Initialize
+    initPage();
+  </script>
+</body>
+</html>

@@ -14,22 +14,24 @@ const App = {
 
   /**
    * Update progress stepper based on current page and completed steps
-   * Note: New 5-step flow (Recon Unit, Data Sources, Schema, Stages & Rules, Review)
+   * Note: 6-step flow (Recon Unit, Data Sources, Schema, Stages & Rules, Review, Run)
    */
   updateProgressStepper() {
     const currentPage = window.location.pathname.split('/').pop();
 
-    // Step mapping for both old (6-step) and new (5-step) flows
+    // Step mapping for the complete flow
     const stepMapping = {
       'index.html': 0,
       '1-recon-unit.html': 1,
       '2-datasources.html': 2,
       '3-schema.html': 3,
-      '4-stages.html': 4,      // New unified page
+      '4-stages.html': 4,      // Stages & Rules
       '4-rules.html': 4,       // Legacy support
       '5-reconciliation.html': 4, // Legacy - redirects to 4-stages
-      '5-review.html': 5,      // New review page (was 6-review)
-      '6-review.html': 5       // Legacy support
+      '5-review.html': 5,      // Review page
+      '6-review.html': 5,      // Legacy support
+      '6-run.html': 6,         // Run reconciliation
+      '7-reports.html': 7      // Reports page (not in stepper)
     };
 
     const currentStep = stepMapping[currentPage] || 0;
@@ -66,7 +68,7 @@ const App = {
   },
 
   /**
-   * Go to next step (5-step flow)
+   * Go to next step (6-step flow)
    */
   nextStep() {
     const currentPage = window.location.pathname.split('/').pop();
@@ -74,12 +76,14 @@ const App = {
       'index.html': '1-recon-unit.html',
       '1-recon-unit.html': '2-datasources.html',
       '2-datasources.html': '3-schema.html',
-      '3-schema.html': '4-stages.html',       // New unified page
-      '4-stages.html': '5-review.html',       // New review page
+      '3-schema.html': '4-stages.html',       // Stages & Rules
+      '4-stages.html': '5-review.html',       // Review page
+      '5-review.html': '6-run.html',          // Run reconciliation
+      '6-run.html': '7-reports.html',         // Reports page
       // Legacy support
       '4-rules.html': '4-stages.html',        // Redirect to new page
       '5-reconciliation.html': '5-review.html',
-      '6-review.html': null                   // End of flow
+      '6-review.html': '6-run.html'
     };
 
     const nextPage = nextPages[currentPage];
@@ -89,7 +93,7 @@ const App = {
   },
 
   /**
-   * Go to previous step (5-step flow)
+   * Go to previous step (6-step flow)
    */
   prevStep() {
     const currentPage = window.location.pathname.split('/').pop();
@@ -97,12 +101,14 @@ const App = {
       '1-recon-unit.html': 'index.html',
       '2-datasources.html': '1-recon-unit.html',
       '3-schema.html': '2-datasources.html',
-      '4-stages.html': '3-schema.html',       // New unified page
-      '5-review.html': '4-stages.html',       // New review page
+      '4-stages.html': '3-schema.html',       // Stages & Rules
+      '5-review.html': '4-stages.html',       // Review page
+      '6-run.html': '5-review.html',          // Run reconciliation
+      '7-reports.html': '6-run.html',         // Reports page
       // Legacy support
       '4-rules.html': '3-schema.html',
       '5-reconciliation.html': '4-stages.html',
-      '6-review.html': '4-stages.html'
+      '6-review.html': '5-review.html'
     };
 
     const prevPage = prevPages[currentPage];

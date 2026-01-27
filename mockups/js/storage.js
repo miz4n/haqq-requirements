@@ -249,6 +249,71 @@ const Storage = {
   }
 };
 
+/**
+ * Execution Results Storage
+ * Manages reconciliation execution results
+ */
+const EXECUTION_RESULTS_KEY = 'execution_results';
+
+const ExecutionStorage = {
+  /**
+   * Save an execution result
+   * @param {Object} result - The execution result to save
+   */
+  saveResult(result) {
+    const results = this.getResults();
+
+    // Keep only last 20 results
+    if (results.length >= 20) {
+      results.pop();
+    }
+
+    results.unshift(result);
+    localStorage.setItem(EXECUTION_RESULTS_KEY, JSON.stringify(results));
+  },
+
+  /**
+   * Get all execution results
+   * @returns {Array} Array of execution results
+   */
+  getResults() {
+    try {
+      const data = localStorage.getItem(EXECUTION_RESULTS_KEY);
+      return data ? JSON.parse(data) : [];
+    } catch (error) {
+      console.error('Error loading execution results:', error);
+      return [];
+    }
+  },
+
+  /**
+   * Get a specific execution result by run ID
+   * @param {string} runId - The run ID to find
+   * @returns {Object|null} The execution result or null
+   */
+  getResultById(runId) {
+    const results = this.getResults();
+    return results.find(r => r.runId === runId) || null;
+  },
+
+  /**
+   * Delete a specific execution result
+   * @param {string} runId - The run ID to delete
+   */
+  deleteResult(runId) {
+    const results = this.getResults();
+    const filtered = results.filter(r => r.runId !== runId);
+    localStorage.setItem(EXECUTION_RESULTS_KEY, JSON.stringify(filtered));
+  },
+
+  /**
+   * Clear all execution results
+   */
+  clearResults() {
+    localStorage.removeItem(EXECUTION_RESULTS_KEY);
+  }
+};
+
 // Export for use in other scripts
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = Storage;

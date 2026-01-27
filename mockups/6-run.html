@@ -1,0 +1,714 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Step 6: Run Reconciliation - Reconciliation Engine</title>
+  <link rel="stylesheet" href="css/main.css">
+  <link rel="stylesheet" href="css/components.css">
+  <link rel="stylesheet" href="css/steps.css">
+  <link rel="stylesheet" href="css/reports.css">
+</head>
+<body class="step-page">
+  <!-- Header -->
+  <header class="site-header">
+    <div class="container">
+      <div class="header-content">
+        <div class="logo">
+          <div class="logo-icon">R</div>
+          <span>Reconciliation Engine</span>
+        </div>
+        <nav>
+          <ul class="main-nav">
+            <li><a href="index.html" class="active">Create</a></li>
+            <li><a href="#">Jobs</a></li>
+            <li><a href="7-reports.html">Results</a></li>
+            <li><a href="#">Settings</a></li>
+          </ul>
+        </nav>
+      </div>
+    </div>
+  </header>
+
+  <!-- Progress Stepper (6 Steps) -->
+  <div class="container mt-3">
+    <div class="progress-stepper">
+      <div class="stepper-container">
+        <div class="step completed">
+          <div class="step-number">1</div>
+          <div class="step-label">Recon Unit</div>
+        </div>
+        <div class="step completed">
+          <div class="step-number">2</div>
+          <div class="step-label">Data Sources</div>
+        </div>
+        <div class="step completed">
+          <div class="step-number">3</div>
+          <div class="step-label">Schema</div>
+        </div>
+        <div class="step completed">
+          <div class="step-number">4</div>
+          <div class="step-label">Stages & Rules</div>
+        </div>
+        <div class="step completed">
+          <div class="step-number">5</div>
+          <div class="step-label">Review</div>
+        </div>
+        <div class="step active">
+          <div class="step-number">6</div>
+          <div class="step-label">Run</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Main Content -->
+  <main class="main-content">
+    <div class="container">
+      <!-- Configuration Panel -->
+      <div class="card mb-4" id="config-panel">
+        <div class="card-header">
+          <h2 class="card-title">Run Reconciliation</h2>
+          <p class="card-subtitle">Execute reconciliation with mock data to preview results</p>
+        </div>
+        <div class="card-body">
+          <!-- Configuration Summary -->
+          <div class="config-summary mb-4" id="config-summary">
+            <!-- Will be populated by JS -->
+          </div>
+
+          <!-- Datetime Range -->
+          <div class="form-section mb-4">
+            <h3 class="section-title">Datetime Range</h3>
+            <p class="section-subtitle">Select the time range for reconciliation</p>
+
+            <div class="datetime-inputs">
+              <div class="form-group">
+                <label class="form-label">Start Date/Time (UTC)</label>
+                <input type="datetime-local" id="startDatetime" class="form-control">
+              </div>
+              <div class="form-group">
+                <label class="form-label">End Date/Time (UTC)</label>
+                <input type="datetime-local" id="endDatetime" class="form-control">
+              </div>
+            </div>
+
+            <div class="quick-select-buttons mt-3">
+              <span class="quick-select-label">Quick Select:</span>
+              <button class="btn btn-outline btn-sm" onclick="setQuickRange('today')">Today</button>
+              <button class="btn btn-outline btn-sm" onclick="setQuickRange('yesterday')">Yesterday</button>
+              <button class="btn btn-outline btn-sm" onclick="setQuickRange('last7days')">Last 7 Days</button>
+              <button class="btn btn-outline btn-sm" onclick="setQuickRange('lastHour')">Last Hour</button>
+            </div>
+          </div>
+
+          <!-- Execution Mode -->
+          <div class="form-section mb-4">
+            <h3 class="section-title">Execution Mode</h3>
+            <div class="execution-modes">
+              <label class="execution-mode-option">
+                <input type="radio" name="runMode" value="preview" checked>
+                <div class="mode-content">
+                  <span class="mode-title">Preview Mode</span>
+                  <span class="mode-desc">Quick run with 100 sample records per source</span>
+                </div>
+              </label>
+              <label class="execution-mode-option">
+                <input type="radio" name="runMode" value="full">
+                <div class="mode-content">
+                  <span class="mode-title">Full Execution</span>
+                  <span class="mode-desc">Complete run with 1,000 records per source</span>
+                </div>
+              </label>
+            </div>
+          </div>
+
+          <!-- Run Button -->
+          <div class="text-center">
+            <button class="btn btn-primary btn-lg" id="runBtn" onclick="startReconciliation()">
+              Run Reconciliation
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Progress Panel (hidden by default) -->
+      <div class="card mb-4" id="progress-panel" style="display: none;">
+        <div class="card-header">
+          <h2 class="card-title">Execution Progress</h2>
+          <p class="card-subtitle" id="progress-status">Initializing...</p>
+        </div>
+        <div class="card-body">
+          <!-- Progress Bar -->
+          <div class="progress-bar-container">
+            <div class="progress-bar-fill" id="progress-fill" style="width: 0%">0%</div>
+          </div>
+
+          <!-- Current Action -->
+          <div class="current-action mt-3" id="current-action">
+            <span class="action-text">Preparing to execute...</span>
+          </div>
+
+          <!-- Timeline -->
+          <div class="execution-timeline mt-4" id="execution-timeline">
+            <div class="timeline-item pending" data-stage="init">
+              <div class="timeline-icon">1</div>
+              <div class="timeline-content">
+                <span class="timeline-title">Loading configuration</span>
+                <span class="timeline-duration"></span>
+              </div>
+            </div>
+            <!-- Stage items will be added dynamically -->
+          </div>
+
+          <!-- Cancel Button -->
+          <div class="text-center mt-4">
+            <button class="btn btn-outline" id="cancelBtn" onclick="cancelExecution()">
+              Cancel
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Completion Panel (hidden by default) -->
+      <div class="card mb-4" id="completion-panel" style="display: none;">
+        <div class="card-header">
+          <h2 class="card-title">Reconciliation Complete!</h2>
+          <p class="card-subtitle" id="completion-summary">Results are ready to view</p>
+        </div>
+        <div class="card-body">
+          <!-- Quick Stats -->
+          <div class="summary-cards mb-4" id="quick-stats">
+            <!-- Will be populated by JS -->
+          </div>
+
+          <!-- Action Buttons -->
+          <div class="completion-actions">
+            <button class="btn btn-primary btn-lg" onclick="viewReports()">
+              View Detailed Reports
+            </button>
+            <button class="btn btn-outline" onclick="runAgain()">
+              Run Again
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <!-- Action Bar -->
+  <div class="action-bar">
+    <div class="container">
+      <div class="action-bar-content">
+        <button class="btn btn-secondary" id="backBtn">
+          ← Back
+        </button>
+        <div style="display: flex; gap: var(--spacing-md);">
+          <button class="btn btn-outline" onclick="window.location.href='7-reports.html'">
+            View Reports
+          </button>
+          <button class="btn btn-primary" id="runActionBtn" onclick="startReconciliation()">
+            Run Reconciliation →
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Scripts -->
+  <script src="js/storage.js"></script>
+  <script src="js/recon-data-generator.js"></script>
+  <script src="js/recon-runner.js"></script>
+  <script src="js/app.js"></script>
+  <script>
+    // Load configuration
+    const config = Storage.get();
+    let currentRunId = null;
+    let patches = null;
+    let baseRunId = null;
+
+    // Initialize page
+    function initPage() {
+      loadPatchesFromUrl();
+      renderConfigSummary();
+      setDefaultDateRange();
+      addStageTimelines();
+    }
+
+    // Load patches from URL if present
+    function loadPatchesFromUrl() {
+      const urlParams = new URLSearchParams(window.location.search);
+      const patchData = urlParams.get('patches');
+      baseRunId = urlParams.get('baseRunId');
+
+      if (patchData) {
+        try {
+          patches = JSON.parse(decodeURIComponent(patchData));
+          // Update UI to show we're running with patches
+          document.querySelector('.card-subtitle').textContent =
+            'Running reconciliation with patches applied';
+        } catch (e) {
+          console.error('Error parsing patches:', e);
+          patches = null;
+        }
+      }
+    }
+
+    // Render configuration summary
+    function renderConfigSummary() {
+      const container = document.getElementById('config-summary');
+
+      // Count stages and rules
+      const stageCount = config.stages?.length || 0;
+      let ruleCount = 0;
+      if (config.stages) {
+        config.stages.forEach(s => {
+          ruleCount += s.rules?.length || 0;
+        });
+      }
+
+      // Count datasources
+      const dsCount = config.dataSources?.length ||
+                      ((config.sourceA ? 1 : 0) + (config.sourceB ? 1 : 0));
+
+      const jobName = config.job?.name || config.reconciliation?.name || 'Unnamed Job';
+
+      // Count patches
+      const patchCount = patches ? Object.values(patches).reduce((sum, arr) => sum + arr.length, 0) : 0;
+
+      let html = `
+        <div class="summary-cards">
+          <div class="summary-card">
+            <div class="summary-card-value">${escapeHtml(jobName)}</div>
+            <div class="summary-card-label">Job Name</div>
+          </div>
+          <div class="summary-card">
+            <div class="summary-card-value">${stageCount}</div>
+            <div class="summary-card-label">Stages</div>
+          </div>
+          <div class="summary-card">
+            <div class="summary-card-value">${ruleCount}</div>
+            <div class="summary-card-label">Rules</div>
+          </div>
+          <div class="summary-card">
+            <div class="summary-card-value">${dsCount}</div>
+            <div class="summary-card-label">Data Sources</div>
+          </div>
+          ${patchCount > 0 ? `
+            <div class="summary-card" style="border-top-color: #8b5cf6;">
+              <div class="summary-card-value">${patchCount}</div>
+              <div class="summary-card-label">Patches</div>
+            </div>
+          ` : ''}
+        </div>
+      `;
+
+      // If running with patches, show patch details
+      if (patches && patchCount > 0) {
+        html += renderPatchesSummary();
+      }
+
+      container.innerHTML = html;
+    }
+
+    // Render patches summary
+    function renderPatchesSummary() {
+      const datasources = config.dataSources || [];
+      if (datasources.length === 0) {
+        if (config.sourceA) datasources.push({ ...config.sourceA, id: 'source_a' });
+        if (config.sourceB) datasources.push({ ...config.sourceB, id: 'source_b' });
+      }
+
+      let html = '<div class="patches-summary mt-3">';
+      html += '<h4 style="font-size: 0.9rem; color: var(--gray-600); margin-bottom: var(--spacing-sm);">Patches to Apply:</h4>';
+
+      for (const [dsId, dsPatches] of Object.entries(patches)) {
+        if (!dsPatches || dsPatches.length === 0) continue;
+
+        const ds = datasources.find(d => d.id === dsId);
+        const dsName = ds?.name || dsId;
+
+        html += `
+          <div class="patch-summary-item">
+            <span class="patch-ds-name">${escapeHtml(dsName)}</span>
+            <span class="patch-count-badge">${dsPatches.length} patch${dsPatches.length > 1 ? 'es' : ''}</span>
+          </div>
+        `;
+      }
+
+      html += '</div>';
+      return html;
+    }
+
+    // Set default datetime range (yesterday to today)
+    function setDefaultDateRange() {
+      const now = new Date();
+      const yesterday = new Date(now);
+      yesterday.setDate(yesterday.getDate() - 1);
+      yesterday.setHours(0, 0, 0, 0);
+
+      const today = new Date(now);
+      today.setHours(0, 0, 0, 0);
+
+      document.getElementById('startDatetime').value = formatDatetimeLocal(yesterday);
+      document.getElementById('endDatetime').value = formatDatetimeLocal(today);
+    }
+
+    // Format date for datetime-local input
+    function formatDatetimeLocal(date) {
+      return date.toISOString().slice(0, 16);
+    }
+
+    // Quick range selection
+    function setQuickRange(range) {
+      const now = new Date();
+      let start, end;
+
+      switch (range) {
+        case 'today':
+          start = new Date(now);
+          start.setHours(0, 0, 0, 0);
+          end = new Date(now);
+          end.setHours(23, 59, 59, 999);
+          break;
+        case 'yesterday':
+          start = new Date(now);
+          start.setDate(start.getDate() - 1);
+          start.setHours(0, 0, 0, 0);
+          end = new Date(now);
+          end.setDate(end.getDate() - 1);
+          end.setHours(23, 59, 59, 999);
+          break;
+        case 'last7days':
+          start = new Date(now);
+          start.setDate(start.getDate() - 7);
+          start.setHours(0, 0, 0, 0);
+          end = new Date(now);
+          end.setHours(0, 0, 0, 0);
+          break;
+        case 'lastHour':
+          end = new Date(now);
+          start = new Date(now);
+          start.setHours(start.getHours() - 1);
+          break;
+      }
+
+      document.getElementById('startDatetime').value = formatDatetimeLocal(start);
+      document.getElementById('endDatetime').value = formatDatetimeLocal(end);
+    }
+
+    // Add stage timelines dynamically
+    function addStageTimelines() {
+      const timeline = document.getElementById('execution-timeline');
+
+      if (config.stages && config.stages.length > 0) {
+        config.stages.forEach((stage, index) => {
+          const item = document.createElement('div');
+          item.className = 'timeline-item pending';
+          item.setAttribute('data-stage', stage.id);
+          item.innerHTML = `
+            <div class="timeline-icon">${index + 2}</div>
+            <div class="timeline-content">
+              <span class="timeline-title">Stage ${index + 1}: ${escapeHtml(stage.name)}</span>
+              <span class="timeline-duration"></span>
+            </div>
+          `;
+          timeline.appendChild(item);
+        });
+      }
+
+      // Add finalization step
+      const finalItem = document.createElement('div');
+      finalItem.className = 'timeline-item pending';
+      finalItem.setAttribute('data-stage', 'finalize');
+      finalItem.innerHTML = `
+        <div class="timeline-icon">${(config.stages?.length || 0) + 2}</div>
+        <div class="timeline-content">
+          <span class="timeline-title">Finalizing results</span>
+          <span class="timeline-duration"></span>
+        </div>
+      `;
+      timeline.appendChild(finalItem);
+    }
+
+    // Start reconciliation
+    async function startReconciliation() {
+      // Validate inputs
+      const startDatetime = document.getElementById('startDatetime').value;
+      const endDatetime = document.getElementById('endDatetime').value;
+
+      if (!startDatetime || !endDatetime) {
+        App.showNotification('Please select start and end datetime', 'warning');
+        return;
+      }
+
+      if (new Date(startDatetime) >= new Date(endDatetime)) {
+        App.showNotification('End datetime must be after start datetime', 'warning');
+        return;
+      }
+
+      const runMode = document.querySelector('input[name="runMode"]:checked').value;
+
+      // Show progress panel
+      document.getElementById('config-panel').style.display = 'none';
+      document.getElementById('progress-panel').style.display = 'block';
+      document.getElementById('completion-panel').style.display = 'none';
+      document.getElementById('runActionBtn').disabled = true;
+
+      // Reset timeline
+      document.querySelectorAll('.timeline-item').forEach(item => {
+        item.classList.remove('completed', 'running');
+        item.classList.add('pending');
+        item.querySelector('.timeline-duration').textContent = '';
+      });
+
+      const datetimeRange = {
+        start: new Date(startDatetime).toISOString(),
+        end: new Date(endDatetime).toISOString()
+      };
+
+      // Execute reconciliation
+      try {
+        const result = await ReconRunner.execute(config, datetimeRange, {
+          runMode: runMode,
+          onProgress: updateProgress
+        });
+
+        currentRunId = result.runId;
+
+        // Save result to storage
+        saveExecutionResult(result);
+
+        // Show completion
+        showCompletion(result);
+
+      } catch (error) {
+        console.error('Execution failed:', error);
+        App.showNotification('Execution failed: ' + error.message, 'error');
+        showConfigPanel();
+      }
+    }
+
+    // Update progress callback
+    function updateProgress(progress) {
+      const fill = document.getElementById('progress-fill');
+      const status = document.getElementById('progress-status');
+      const action = document.getElementById('current-action');
+
+      fill.style.width = progress.percent + '%';
+      fill.textContent = progress.percent + '%';
+
+      action.querySelector('.action-text').textContent = progress.action;
+
+      // Update status
+      if (progress.stage) {
+        status.textContent = `Executing: ${progress.stage}`;
+      }
+
+      // Update timeline
+      updateTimeline(progress);
+    }
+
+    // Update execution timeline
+    function updateTimeline(progress) {
+      const items = document.querySelectorAll('.timeline-item');
+
+      // Mark init as completed when we start stages
+      if (progress.percent > 5) {
+        const initItem = document.querySelector('[data-stage="init"]');
+        if (initItem && !initItem.classList.contains('completed')) {
+          initItem.classList.remove('pending', 'running');
+          initItem.classList.add('completed');
+        }
+      }
+
+      // Mark current stage as running
+      if (progress.stage) {
+        items.forEach(item => {
+          const title = item.querySelector('.timeline-title').textContent;
+          if (title.includes(progress.stage)) {
+            item.classList.remove('pending');
+            item.classList.add('running');
+          }
+        });
+      }
+
+      // Mark finalization
+      if (progress.percent >= 95) {
+        items.forEach(item => {
+          if (!item.classList.contains('completed') && !item.getAttribute('data-stage').includes('finalize')) {
+            item.classList.remove('pending', 'running');
+            item.classList.add('completed');
+          }
+        });
+        const finalItem = document.querySelector('[data-stage="finalize"]');
+        if (finalItem) {
+          finalItem.classList.remove('pending');
+          finalItem.classList.add('running');
+        }
+      }
+
+      // Mark all completed
+      if (progress.percent >= 100) {
+        items.forEach(item => {
+          item.classList.remove('pending', 'running');
+          item.classList.add('completed');
+        });
+      }
+    }
+
+    // Show completion panel
+    function showCompletion(result) {
+      document.getElementById('config-panel').style.display = 'none';
+      document.getElementById('progress-panel').style.display = 'none';
+      document.getElementById('completion-panel').style.display = 'block';
+      document.getElementById('runActionBtn').disabled = false;
+
+      // Update summary
+      const summary = document.getElementById('completion-summary');
+      summary.textContent = `Processed ${result.summary.totalLeftRecords.toLocaleString()} records in ${formatDuration(result.timing.durationMs)}`;
+
+      // Render quick stats
+      const stats = document.getElementById('quick-stats');
+      stats.innerHTML = `
+        <div class="summary-card success">
+          <div class="summary-card-value">${result.summary.totalMatched.toLocaleString()}</div>
+          <div class="summary-card-label">Matched</div>
+        </div>
+        <div class="summary-card warning">
+          <div class="summary-card-value">${result.summary.totalUnmatchedLeft.toLocaleString()}</div>
+          <div class="summary-card-label">Unmatched Left</div>
+        </div>
+        <div class="summary-card error">
+          <div class="summary-card-value">${result.summary.totalUnmatchedRight.toLocaleString()}</div>
+          <div class="summary-card-label">Unmatched Right</div>
+        </div>
+        <div class="summary-card">
+          <div class="summary-card-value">${result.summary.matchRate}%</div>
+          <div class="summary-card-label">Match Rate</div>
+        </div>
+      `;
+    }
+
+    // Show config panel
+    function showConfigPanel() {
+      document.getElementById('config-panel').style.display = 'block';
+      document.getElementById('progress-panel').style.display = 'none';
+      document.getElementById('completion-panel').style.display = 'none';
+      document.getElementById('runActionBtn').disabled = false;
+    }
+
+    // Cancel execution
+    function cancelExecution() {
+      ReconRunner.cancel();
+      showConfigPanel();
+      App.showNotification('Execution cancelled', 'info');
+    }
+
+    // Run again
+    function runAgain() {
+      showConfigPanel();
+    }
+
+    // View reports
+    function viewReports() {
+      if (currentRunId) {
+        window.location.href = `7-reports.html?runId=${currentRunId}`;
+      } else {
+        window.location.href = '7-reports.html';
+      }
+    }
+
+    // Save execution result to storage
+    function saveExecutionResult(result) {
+      const key = 'execution_results';
+      let results = [];
+
+      try {
+        const existing = localStorage.getItem(key);
+        if (existing) {
+          results = JSON.parse(existing);
+        }
+      } catch (e) {
+        console.error('Error loading existing results:', e);
+      }
+
+      // Add patches info to result if running with patches
+      if (patches && Object.keys(patches).length > 0) {
+        result.patches = patches;
+        result.isPatchRun = true;
+
+        // Track both base run and previous run
+        const urlParams = new URLSearchParams(window.location.search);
+        const previousRunId = urlParams.get('previousRunId');
+
+        result.baseRunId = baseRunId || findBaseRunId(results);
+        result.previousRunId = previousRunId || findPreviousRunId(results);
+      }
+
+      // Keep only last 20 results
+      if (results.length >= 20) {
+        results.pop();
+      }
+
+      results.unshift(result);
+      localStorage.setItem(key, JSON.stringify(results));
+
+      // Clear patches from localStorage after successful run
+      if (patches) {
+        localStorage.removeItem('report_patches');
+      }
+    }
+
+    // Find the most recent non-patch run to use as base
+    function findBaseRunId(results) {
+      if (results.length > 0) {
+        const baseRun = results.find(r => !r.isPatchRun);
+        return baseRun?.runId || null;
+      }
+      return null;
+    }
+
+    // Find the most recent run ID (any type) to use as previous
+    function findPreviousRunId(results) {
+      if (results.length > 0) {
+        return results[0].runId;
+      }
+      return null;
+    }
+
+    // Format duration
+    function formatDuration(ms) {
+      if (ms < 1000) {
+        return ms + 'ms';
+      }
+      const seconds = Math.floor(ms / 1000);
+      if (seconds < 60) {
+        return seconds + 's';
+      }
+      const minutes = Math.floor(seconds / 60);
+      const remainingSeconds = seconds % 60;
+      return minutes + 'm ' + remainingSeconds + 's';
+    }
+
+    // Escape HTML
+    function escapeHtml(str) {
+      if (!str) return '';
+      return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+    }
+
+    // Override navigation
+    App.validateCurrentStep = function() {
+      return true;
+    };
+
+    // Initialize
+    initPage();
+  </script>
+</body>
+</html>

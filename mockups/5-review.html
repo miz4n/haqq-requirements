@@ -21,7 +21,7 @@
           <ul class="main-nav">
             <li><a href="index.html" class="active">Create</a></li>
             <li><a href="#">Jobs</a></li>
-            <li><a href="#">Results</a></li>
+            <li><a href="7-reports.html">Results</a></li>
             <li><a href="#">Settings</a></li>
           </ul>
         </nav>
@@ -105,16 +105,16 @@
       <div class="card">
         <div class="card-body" style="text-align: center;">
           <h3 class="mb-3">What's Next?</h3>
-          <p class="text-gray mb-4">You can download the YAML configuration and use it with the reconciliation engine CLI, or make changes to your configuration.</p>
+          <p class="text-gray mb-4">Run a test reconciliation with mock data, download the YAML configuration, or make changes to your setup.</p>
           <div style="display: flex; gap: var(--spacing-md); justify-content: center; flex-wrap: wrap;">
             <button class="btn btn-outline" onclick="startOver()">
               Start Over
             </button>
-            <button class="btn btn-outline" onclick="saveDraft()">
-              Save Draft
+            <button class="btn btn-outline" onclick="downloadYAML()">
+              Download YAML
             </button>
-            <button class="btn btn-primary btn-lg" onclick="downloadYAML()">
-              Download YAML Configuration
+            <button class="btn btn-primary btn-lg" onclick="window.location.href='6-run.html'">
+              Run Reconciliation
             </button>
           </div>
         </div>
@@ -133,8 +133,8 @@
           <button class="btn btn-outline" onclick="downloadYAML()">
             Download YAML
           </button>
-          <button class="btn btn-primary" onclick="window.location.href='index.html'">
-            Done
+          <button class="btn btn-primary" onclick="window.location.href='6-run.html'">
+            Run Reconciliation →
           </button>
         </div>
       </div>
