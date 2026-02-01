@@ -149,6 +149,53 @@ matching_rules:
 
 **Available Functions**: `upper()`, `lower()`, `trim()`, `abs()`
 
+### 3.4 Deduplication Ordering
+
+**Requirement**: When JOIN conditions produce multiple matching records (duplicates), define ordering to select which record to use.
+
+**Use Case**: A payment gateway may have multiple records for the same transaction (e.g., status updates). Use deduplication ordering to select the latest record.
+
+**Configuration**:
+```yaml
+matching_rules:
+  join:
+    - left: source_a.transaction_id
+      right: source_b.transaction_id
+
+  # When multiple records match, order by these fields and take first
+  deduplication_order:
+    left:
+      - field: source_a.updated_at
+        direction: desc
+      - field: source_a.id
+        direction: asc  # Tie-breaker
+    right:
+      - field: source_b.created_at
+        direction: desc
+```
+
+**Behavior**:
+1. JOIN conditions are evaluated first
+2. If multiple records match on either side:
+   - Records are ordered by specified fields
+   - First record after ordering is used for matching
+   - Remaining duplicates are tracked separately
+3. Ordering supports multiple columns for tie-breaking
+4. Each side (left/right) can have independent ordering rules
+
+**Example**: Select latest payment status
+```yaml
+deduplication_order:
+  left:
+    - field: source_a.status_timestamp
+      direction: desc  # Most recent first
+  right:
+    - field: source_b.updated_at
+      direction: desc
+    - field: source_b.sequence_number
+      direction: desc  # Tie-breaker if same timestamp
+```
+
 ## 4. Comparison Operators
 
 ### 4.1 Supported Operators

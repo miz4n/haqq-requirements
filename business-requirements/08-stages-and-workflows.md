@@ -130,6 +130,14 @@ stage:
     matching_rules: ledger_gateway_rules:v1
     schema_a: ledger_schema:v2
     schema_b: gateway_schema:v1
+    # Deduplication ordering: when JOIN produces multiple matches
+    deduplication_order:
+      left:
+        - field: source_a.updated_at
+          direction: desc
+      right:
+        - field: source_b.created_at
+          direction: desc
 
   outputs:
     matched:
@@ -266,6 +274,12 @@ schema:
       type: string  # Comma-separated list of rules that failed
     - name: matched_at
       type: timestamp
+    - name: duplicate_count_left
+      type: integer
+      description: "Number of duplicate records from left source"
+    - name: duplicate_count_right
+      type: integer
+      description: "Number of duplicate records from right source"
 ```
 
 ### 5.3 Output Queries
@@ -305,6 +319,53 @@ stage:
 ```
 
 **Note**: These named queries become available for use in subsequent stage inputs.
+
+### 5.4 Duplicate Records Output
+
+**Requirement**: Track and export records that were identified as duplicates during deduplication ordering.
+
+**Output Categories**:
+- `duplicates_left`: Records from source A that matched but were not selected due to ordering
+- `duplicates_right`: Records from source B that matched but were not selected due to ordering
+
+**Configuration**:
+```yaml
+stage:
+  outputs:
+    matched:
+      storage:
+        type: csv
+        path: /results/{run_id}/matched.csv
+    duplicates_left:
+      storage:
+        type: csv
+        path: /results/{run_id}/duplicates_left.csv
+    duplicates_right:
+      storage:
+        type: csv
+        path: /results/{run_id}/duplicates_right.csv
+```
+
+**Duplicate Record Schema**:
+```yaml
+schema:
+  fields:
+    - name: original_record_id
+      type: string
+      description: "ID of the record that was selected"
+    - name: duplicate_record_id
+      type: string
+      description: "ID of this duplicate record"
+    - name: join_key_values
+      type: string
+      description: "Values used in JOIN condition"
+    - name: ordering_field_values
+      type: string
+      description: "Values of fields used for ordering"
+    - name: reason
+      type: string
+      description: "Why this was not selected (e.g., 'older timestamp')"
+```
 
 ## 6. Using Query Results in Stages
 
@@ -697,6 +758,10 @@ workflow_execution:
       completed_at: 2024-03-15T12:00:30Z
       duration: 30s
       records_processed: 10000
+      duplicates:
+        left: 150
+        right: 87
+        total: 237
 
     - name: stage_2_gateway_bank
       status: completed
@@ -704,6 +769,10 @@ workflow_execution:
       completed_at: 2024-03-15T12:00:45Z
       duration: 45s
       records_processed: 9995
+      duplicates:
+        left: 42
+        right: 28
+        total: 70
 
     - name: stage_3_consolidation
       status: in_progress
@@ -711,6 +780,10 @@ workflow_execution:
       progress: 45%
       records_processed: 4500
       estimated_completion: 2024-03-15T12:01:20Z
+      duplicates:
+        left: 0
+        right: 0
+        total: 0
 ```
 
 ## 9. Complete Workflow Example
