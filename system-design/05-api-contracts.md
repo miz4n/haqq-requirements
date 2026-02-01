@@ -2,124 +2,219 @@
 
 ## 1. Overview
 
-The reconciliation engine exposes a RESTful API for:
-- Job configuration management
-- Execution control
-- Results and explanations retrieval
+The reconciliation engine exposes a RESTful API built with Spring Boot. All endpoints use the `/api/v1/` versioning prefix.
 
-Base URL: `/api/v1`
+```
+Base URL: https://api.reconhub.example.com/api/v1
+Content-Type: application/json
+Authorization: Bearer {jwt_token}
+```
 
 ## 2. Authentication
 
-All endpoints require authentication via JWT bearer token:
-
-```http
-Authorization: Bearer <token>
+```yaml
+# Authentication endpoints (no /api/v1 prefix)
+POST   /auth/login              # OAuth2 login
+POST   /auth/refresh            # Refresh token
+POST   /auth/logout             # Logout
 ```
 
-## 3. Configuration API
+## 3. Data Sources API
 
-### 3.1 List Jobs
+### 3.1 Endpoints
 
-```http
-GET /api/v1/jobs
-```
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/v1/data-sources` | List all data sources |
+| POST | `/api/v1/data-sources` | Create new data source |
+| GET | `/api/v1/data-sources/{id}` | Get data source details |
+| PUT | `/api/v1/data-sources/{id}` | Update data source |
+| DELETE | `/api/v1/data-sources/{id}` | Delete data source |
+| POST | `/api/v1/data-sources/{id}/test` | Test connection |
+| POST | `/api/v1/data-sources/{id}/preview` | Preview data (first 100 rows) |
 
-**Query Parameters:**
+### 3.2 List Data Sources
 
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `limit` | integer | Page size (default: 20, max: 100) |
-| `offset` | integer | Pagination offset |
-| `search` | string | Search by name |
-| `status` | string | Filter by status |
-
-**Response:**
 ```json
+GET /api/v1/data-sources?limit=20&offset=0
+
+Response 200:
 {
-  "total": 45,
+  "total": 5,
   "limit": 20,
   "offset": 0,
-  "jobs": [
+  "data": [
     {
-      "id": "job_abc123",
-      "name": "Daily Bank Reconciliation",
-      "description": "Reconcile ledger with bank statement",
+      "id": "ds-uuid-...",
+      "name": "payment_gateway",
+      "type": "postgresql",
+      "airbyte_connection_id": "conn-abc123",
       "status": "active",
-      "version": 3,
-      "lastRunAt": "2024-03-15T06:00:00Z",
-      "lastRunStatus": "completed",
-      "createdAt": "2024-01-10T14:30:00Z",
-      "updatedAt": "2024-03-14T09:15:00Z"
+      "last_sync_at": "2024-03-15T06:00:00Z",
+      "created_at": "2024-01-10T14:30:00Z"
     }
   ]
 }
 ```
 
-### 3.2 Create Job
+### 3.3 Create Data Source
 
-```http
-POST /api/v1/jobs
-Content-Type: application/json
+```json
+POST /api/v1/data-sources
+{
+  "name": "payment_gateway",
+  "type": "postgresql",
+  "airbyte_connection_id": "conn-abc123",
+  "schema": {
+    "fields": [
+      {"name": "transaction_id", "type": "string"},
+      {"name": "amount", "type": "decimal"},
+      {"name": "currency", "type": "string"},
+      {"name": "timestamp", "type": "datetime"}
+    ]
+  }
+}
+
+Response 201:
+{
+  "id": "ds-uuid-...",
+  "name": "payment_gateway",
+  "type": "postgresql",
+  "status": "active",
+  "created_at": "2024-03-15T10:00:00Z"
+}
 ```
 
-**Request Body:**
+### 3.4 Get Data Source
+
 ```json
+GET /api/v1/data-sources/{id}
+
+Response 200:
 {
-  "name": "Daily Bank Reconciliation",
-  "description": "Reconcile internal ledger with bank statement",
-  "dataSources": [
+  "id": "ds-uuid-...",
+  "name": "payment_gateway",
+  "type": "postgresql",
+  "airbyte_connection_id": "conn-abc123",
+  "status": "active",
+  "schema": {
+    "fields": [
+      {"name": "transaction_id", "type": "string"},
+      {"name": "amount", "type": "decimal"},
+      {"name": "currency", "type": "string"},
+      {"name": "timestamp", "type": "datetime"}
+    ]
+  },
+  "last_sync_at": "2024-03-15T06:00:00Z",
+  "created_at": "2024-01-10T14:30:00Z",
+  "updated_at": "2024-03-14T09:15:00Z"
+}
+```
+
+### 3.5 Test Connection
+
+```json
+POST /api/v1/data-sources/{id}/test
+
+Response 200:
+{
+  "success": true,
+  "latency_ms": 45,
+  "message": "Connection successful"
+}
+
+Response 400:
+{
+  "success": false,
+  "error": "Connection refused",
+  "details": "Unable to connect to host:5432"
+}
+```
+
+### 3.6 Preview Data
+
+```json
+POST /api/v1/data-sources/{id}/preview
+
+Response 200:
+{
+  "row_count": 100,
+  "columns": ["transaction_id", "amount", "currency", "timestamp"],
+  "data": [
+    ["TXN001", 100.50, "USD", "2024-03-15T10:00:00Z"],
+    ["TXN002", 250.00, "EUR", "2024-03-15T10:01:00Z"]
+  ]
+}
+```
+
+## 4. Reconciliations API
+
+### 4.1 Endpoints
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/v1/reconciliations` | List all reconciliations |
+| POST | `/api/v1/reconciliations` | Create new reconciliation |
+| GET | `/api/v1/reconciliations/{id}` | Get reconciliation details |
+| PUT | `/api/v1/reconciliations/{id}` | Update (creates new version) |
+| DELETE | `/api/v1/reconciliations/{id}` | Delete reconciliation |
+| POST | `/api/v1/reconciliations/{id}/validate` | Validate configuration |
+| POST | `/api/v1/reconciliations/{id}/dry-run` | Test run without saving |
+
+### 4.2 List Reconciliations
+
+```json
+GET /api/v1/reconciliations?limit=20&offset=0&status=active
+
+Response 200:
+{
+  "total": 12,
+  "limit": 20,
+  "offset": 0,
+  "data": [
     {
-      "id": "internal_ledger",
-      "name": "Internal Ledger",
-      "type": "postgresql",
-      "config": {
-        "connectionString": "${LEDGER_DB_URL}",
-        "query": "SELECT * FROM transactions WHERE date = :run_date"
-      }
+      "id": "recon-uuid-...",
+      "name": "daily_payment_reconciliation",
+      "description": "Daily payment gateway reconciliation",
+      "version": 3,
+      "status": "active",
+      "last_run_at": "2024-03-15T06:00:00Z",
+      "last_run_status": "completed",
+      "created_at": "2024-01-10T14:30:00Z"
+    }
+  ]
+}
+```
+
+### 4.3 Create Reconciliation
+
+```json
+POST /api/v1/reconciliations
+{
+  "name": "daily_payment_reconciliation",
+  "description": "Daily payment gateway reconciliation",
+  "source_a": {
+    "datasource_id": "ds-uuid-a",
+    "filters": {}
+  },
+  "source_b": {
+    "datasource_id": "ds-uuid-b",
+    "filters": {}
+  },
+  "join_keys": {
+    "left": ["transaction_id"],
+    "right": ["txn_id"]
+  },
+  "rules": [
+    {
+      "name": "amount_tolerance",
+      "expression": "(pl.col('amount') - pl.col('amount_right')).abs() <= 0.01",
+      "severity": "error"
     },
     {
-      "id": "bank_statement",
-      "name": "Bank Statement",
-      "type": "sftp",
-      "config": {
-        "host": "sftp.bank.com",
-        "path": "/statements/{date}.csv"
-      }
-    }
-  ],
-  "stages": [
-    {
-      "id": "stage_main",
-      "name": "Main Reconciliation",
-      "order": 1,
-      "mode": "one_to_one",
-      "datasourceLeft": {
-        "type": "datasource",
-        "datasourceId": "internal_ledger"
-      },
-      "datasourceRight": {
-        "type": "datasource",
-        "datasourceId": "bank_statement"
-      },
-      "joinConditions": [
-        {
-          "leftField": "transaction_id",
-          "rightField": "ref_number"
-        }
-      ],
-      "matchingRule": {
-        "type": "boolean",
-        "operator": "AND",
-        "children": [
-          {
-            "type": "comparison",
-            "left": { "type": "field", "source": "left", "name": "amount" },
-            "operator": "=",
-            "right": { "type": "field", "source": "right", "name": "amount" }
-          }
-        ]
-      }
+      "name": "currency_match",
+      "expression": "pl.col('currency') == pl.col('currency_right')",
+      "severity": "error"
     }
   ],
   "schedule": {
@@ -127,586 +222,461 @@ Content-Type: application/json
     "timezone": "UTC"
   }
 }
-```
 
-**Response (201 Created):**
-```json
+Response 201:
 {
-  "id": "job_xyz789",
-  "name": "Daily Bank Reconciliation",
+  "id": "recon-uuid-...",
+  "name": "daily_payment_reconciliation",
   "version": 1,
   "status": "active",
-  "createdAt": "2024-03-15T10:00:00Z"
+  "created_at": "2024-03-15T10:00:00Z"
 }
 ```
 
-### 3.3 Get Job
+### 4.4 Get Reconciliation
 
-```http
-GET /api/v1/jobs/{jobId}
-```
-
-**Response:**
 ```json
+GET /api/v1/reconciliations/{id}
+
+Response 200:
 {
-  "id": "job_abc123",
-  "name": "Daily Bank Reconciliation",
-  "description": "Reconcile ledger with bank statement",
-  "status": "active",
+  "id": "recon-uuid-...",
+  "name": "daily_payment_reconciliation",
+  "description": "Daily payment gateway reconciliation",
   "version": 3,
-  "config": {
-    "dataSources": [...],
-    "stages": [...],
-    "schedule": {...}
+  "status": "active",
+  "source_a": {
+    "datasource_id": "ds-uuid-a",
+    "datasource_name": "internal_ledger",
+    "filters": {}
   },
-  "stats": {
-    "totalRuns": 45,
-    "successfulRuns": 43,
-    "failedRuns": 2,
-    "avgDurationMs": 12500
+  "source_b": {
+    "datasource_id": "ds-uuid-b",
+    "datasource_name": "payment_gateway",
+    "filters": {}
   },
-  "createdAt": "2024-01-10T14:30:00Z",
-  "updatedAt": "2024-03-14T09:15:00Z"
-}
-```
-
-### 3.4 Update Job
-
-```http
-PUT /api/v1/jobs/{jobId}
-Content-Type: application/json
-```
-
-**Request Body:** Same as Create Job
-
-**Response (200 OK):**
-```json
-{
-  "id": "job_abc123",
-  "version": 4,
-  "updatedAt": "2024-03-15T10:30:00Z"
-}
-```
-
-### 3.5 Delete Job
-
-```http
-DELETE /api/v1/jobs/{jobId}
-```
-
-**Response (204 No Content)**
-
-### 3.6 Validate Job Configuration
-
-```http
-POST /api/v1/jobs/validate
-Content-Type: application/json
-```
-
-**Request Body:** Same as Create Job
-
-**Response:**
-```json
-{
-  "valid": true,
-  "warnings": [
+  "join_keys": {
+    "left": ["transaction_id"],
+    "right": ["txn_id"]
+  },
+  "rules": [
     {
-      "path": "stages[0].matchingRule",
-      "message": "Rule has no tolerance for amount comparison"
+      "name": "amount_tolerance",
+      "expression": "(pl.col('amount') - pl.col('amount_right')).abs() <= 0.01",
+      "severity": "error"
     }
   ],
-  "errors": []
+  "schedule": {
+    "cron": "0 6 * * *",
+    "timezone": "UTC"
+  },
+  "stats": {
+    "total_runs": 45,
+    "successful_runs": 43,
+    "failed_runs": 2,
+    "avg_duration_ms": 12500
+  },
+  "created_at": "2024-01-10T14:30:00Z",
+  "updated_at": "2024-03-14T09:15:00Z"
 }
 ```
 
-Or with errors:
+### 4.5 Update Reconciliation
+
 ```json
+PUT /api/v1/reconciliations/{id}
+{
+  "name": "daily_payment_reconciliation",
+  "description": "Updated description",
+  "rules": [...]
+}
+
+Response 200:
+{
+  "id": "recon-uuid-...",
+  "version": 4,
+  "updated_at": "2024-03-15T10:30:00Z"
+}
+```
+
+### 4.6 Validate Configuration
+
+```json
+POST /api/v1/reconciliations/{id}/validate
+
+Response 200:
+{
+  "valid": true,
+  "warnings": [],
+  "errors": []
+}
+
+Response 400:
 {
   "valid": false,
   "warnings": [],
   "errors": [
     {
-      "path": "stages[0].datasourceLeft.datasourceId",
-      "code": "DATASOURCE_NOT_FOUND",
-      "message": "Data source 'invalid_source' not found"
+      "field": "rules[0].expression",
+      "message": "Invalid Polars expression: unknown column 'amnt'"
     }
   ]
 }
 ```
 
-## 4. Execution API
+### 4.7 Dry Run
 
-### 4.1 Run Job
+```json
+POST /api/v1/reconciliations/{id}/dry-run
+{
+  "sample_size": 1000,
+  "date_range": {
+    "start": "2024-03-15T00:00:00Z",
+    "end": "2024-03-15T23:59:59Z"
+  }
+}
 
-```http
-POST /api/v1/jobs/{jobId}/run
-Content-Type: application/json
+Response 200:
+{
+  "sample_size": 1000,
+  "matched": 850,
+  "unmatched_left": 75,
+  "unmatched_right": 75,
+  "rule_statistics": {
+    "amount_tolerance": {"passed": 900, "failed": 100},
+    "currency_match": {"passed": 980, "failed": 20}
+  }
+}
 ```
 
-**Request Body (optional):**
+## 5. Jobs API
+
+### 5.1 Endpoints
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/v1/jobs` | List jobs |
+| POST | `/api/v1/jobs` | Submit new job |
+| GET | `/api/v1/jobs/{id}` | Get job status |
+| DELETE | `/api/v1/jobs/{id}` | Cancel job |
+
+### 5.2 List Jobs
+
 ```json
+GET /api/v1/jobs?limit=20&offset=0&status=completed
+
+Response 200:
 {
-  "parameters": {
-    "run_date": "2024-03-15"
+  "total": 156,
+  "limit": 20,
+  "offset": 0,
+  "data": [
+    {
+      "job_id": "job-uuid-...",
+      "reconciliation_id": "recon-uuid-...",
+      "reconciliation_name": "daily_payment_reconciliation",
+      "status": "completed",
+      "started_at": "2024-03-15T06:00:00Z",
+      "completed_at": "2024-03-15T06:00:45Z",
+      "duration_seconds": 45
+    }
+  ]
+}
+```
+
+### 5.3 Submit Job
+
+```json
+POST /api/v1/jobs
+{
+  "reconciliation_id": "recon-uuid-...",
+  "date_range": {
+    "start": "2024-03-15T00:00:00Z",
+    "end": "2024-03-16T00:00:00Z"
   },
-  "dryRun": false
+  "options": {
+    "dry_run": false,
+    "notify_on_complete": true
+  }
 }
-```
 
-**Response (202 Accepted):**
-```json
+Response 202:
 {
-  "runId": "run_def456",
-  "jobId": "job_abc123",
+  "job_id": "job-uuid-...",
   "status": "pending",
-  "startedAt": null,
-  "estimatedDuration": 15000
+  "estimated_duration_seconds": 45,
+  "queue_position": 0
 }
 ```
 
-### 4.2 Get Run Status
+### 5.4 Get Job Status
 
-```http
-GET /api/v1/runs/{runId}
-```
-
-**Response:**
 ```json
+GET /api/v1/jobs/{id}
+
+Response 200:
 {
-  "runId": "run_def456",
-  "jobId": "job_abc123",
+  "job_id": "job-uuid-...",
+  "reconciliation_id": "recon-uuid-...",
   "status": "running",
   "progress": {
-    "currentStage": "stage_main",
-    "stageProgress": 65,
-    "overallProgress": 45,
-    "recordsProcessed": 125000,
-    "estimatedRemaining": 8500
+    "records_processed": 25000,
+    "total_records": 50000,
+    "percent_complete": 50
   },
-  "stages": [
-    {
-      "stageId": "stage_main",
-      "status": "running",
-      "startedAt": "2024-03-15T06:00:15Z",
-      "metrics": {
-        "leftRecords": 150000,
-        "rightRecords": 148500,
-        "matchedSoFar": 98000,
-        "unmatchedLeftSoFar": 12000,
-        "unmatchedRightSoFar": 8500
-      }
-    }
-  ],
-  "startedAt": "2024-03-15T06:00:00Z",
-  "completedAt": null
+  "started_at": "2024-03-15T06:00:00Z",
+  "completed_at": null
 }
 ```
 
-### 4.3 Cancel Run
+Job status values: `pending`, `running`, `completed`, `failed`, `cancelled`
 
-```http
-POST /api/v1/runs/{runId}/cancel
-```
+### 5.5 Cancel Job
 
-**Response (200 OK):**
 ```json
+DELETE /api/v1/jobs/{id}
+
+Response 200:
 {
-  "runId": "run_def456",
+  "job_id": "job-uuid-...",
   "status": "cancelling",
   "message": "Cancellation requested"
 }
 ```
 
-### 4.4 List Runs
+## 6. Results API
 
-```http
-GET /api/v1/runs
-```
+### 6.1 Endpoints
 
-**Query Parameters:**
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `jobId` | string | Filter by job ID |
-| `status` | string | Filter by status |
-| `startDate` | datetime | Filter by start date |
-| `endDate` | datetime | Filter by end date |
-| `limit` | integer | Page size |
-| `offset` | integer | Pagination offset |
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/v1/jobs/{id}/results` | Get results summary |
+| GET | `/api/v1/jobs/{id}/matched` | Query matched records |
+| GET | `/api/v1/jobs/{id}/unmatched-left` | Query unmatched left |
+| GET | `/api/v1/jobs/{id}/unmatched-right` | Query unmatched right |
+| GET | `/api/v1/jobs/{id}/stats` | Rule statistics |
+| GET | `/api/v1/jobs/{id}/explain/{record_id}` | Explain single match |
+| POST | `/api/v1/jobs/{id}/export` | Export to CSV |
 
-**Response:**
+### 6.2 Results Summary
+
 ```json
+GET /api/v1/jobs/{id}/results
+
+Response 200:
 {
-  "total": 156,
-  "runs": [
-    {
-      "runId": "run_def456",
-      "jobId": "job_abc123",
-      "jobName": "Daily Bank Reconciliation",
-      "status": "completed",
-      "summary": {
-        "matched": 145000,
-        "unmatchedLeft": 2500,
-        "unmatchedRight": 1500,
-        "matchRate": 96.7
-      },
-      "durationMs": 12450,
-      "startedAt": "2024-03-15T06:00:00Z",
-      "completedAt": "2024-03-15T06:00:12Z"
-    }
-  ]
-}
-```
-
-## 5. Results API
-
-### 5.1 Get Run Results Summary
-
-```http
-GET /api/v1/runs/{runId}/results
-```
-
-**Response:**
-```json
-{
-  "runId": "run_def456",
-  "jobId": "job_abc123",
-  "status": "completed",
+  "job_id": "job-uuid-...",
+  "reconciliation_id": "recon-uuid-...",
   "summary": {
-    "totalLeftRecords": 150000,
-    "totalRightRecords": 148500,
-    "matched": 145000,
-    "unmatchedLeft": 2500,
-    "unmatchedRight": 1500,
-    "matchFailed": 2000,
-    "matchRate": 96.67,
-    "processingTime": 12450
+    "total_left": 25000,
+    "total_right": 25500,
+    "matched": 24000,
+    "unmatched_left": 1000,
+    "unmatched_right": 1500,
+    "match_rate": 0.96
   },
-  "stages": [
-    {
-      "stageId": "stage_main",
-      "stageName": "Main Reconciliation",
-      "metrics": {
-        "leftRecords": 150000,
-        "rightRecords": 148500,
-        "matched": 145000,
-        "unmatchedLeft": 2500,
-        "unmatchedRight": 1500,
-        "matchFailed": 2000,
-        "matchRate": 96.67
-      },
-      "outputs": {
-        "matched": {
-          "count": 145000,
-          "downloadUrl": "/api/v1/runs/run_def456/stages/stage_main/matched"
-        },
-        "unmatchedLeft": {
-          "count": 2500,
-          "downloadUrl": "/api/v1/runs/run_def456/stages/stage_main/unmatched-left"
-        },
-        "unmatchedRight": {
-          "count": 1500,
-          "downloadUrl": "/api/v1/runs/run_def456/stages/stage_main/unmatched-right"
-        }
-      }
-    }
-  ],
-  "completedAt": "2024-03-15T06:00:12Z"
+  "rule_statistics": {
+    "amount_tolerance": {"passed": 23500, "failed": 500},
+    "currency_match": {"passed": 24800, "failed": 200}
+  },
+  "completed_at": "2024-03-15T06:00:45Z"
 }
 ```
 
-### 5.2 Download Matched Records
+### 6.3 Query Matched Records
 
-```http
-GET /api/v1/runs/{runId}/stages/{stageId}/matched
-Accept: text/csv
-```
-
-**Query Parameters:**
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `format` | string | `csv` or `json` (default: csv) |
-| `limit` | integer | Max records (for preview) |
-
-**Response (CSV):**
-```csv
-left_transaction_id,left_amount,left_currency,right_ref_number,right_amount,right_currency,match_result
-TXN-001,100.50,USD,REF-001,100.50,USD,MATCHED
-TXN-002,250.00,USD,REF-002,250.00,USD,MATCHED
-```
-
-### 5.3 Download Unmatched Records
-
-```http
-GET /api/v1/runs/{runId}/stages/{stageId}/unmatched-left
-GET /api/v1/runs/{runId}/stages/{stageId}/unmatched-right
-```
-
-Same parameters and format as matched records.
-
-### 5.4 Get Match Explanations
-
-```http
-GET /api/v1/runs/{runId}/explanations
-```
-
-**Query Parameters:**
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `stageId` | string | Filter by stage |
-| `result` | string | Filter by result (MATCHED, MATCH_FAILED, etc.) |
-| `limit` | integer | Page size (default: 100) |
-| `offset` | integer | Pagination offset |
-
-**Response:**
 ```json
+GET /api/v1/jobs/{id}/matched?rules_failed=amount_tolerance&limit=100&offset=0
+
+Response 200:
 {
-  "total": 2000,
-  "explanations": [
+  "total": 523,
+  "limit": 100,
+  "offset": 0,
+  "data": [
     {
-      "id": "exp_abc123",
-      "stageId": "stage_main",
-      "result": "MATCH_FAILED",
-      "leftKey": { "transaction_id": "TXN-500" },
-      "rightKey": { "ref_number": "REF-500" },
-      "summary": "Amount mismatch: $100.50 vs $105.00",
-      "leftRecord": {
-        "transaction_id": "TXN-500",
-        "amount": 100.50,
-        "currency": "USD"
-      },
-      "rightRecord": {
-        "ref_number": "REF-500",
-        "amount": 105.00,
-        "currency": "USD"
-      }
+      "transaction_id": "TXN001",
+      "amount": 100.50,
+      "amount_right": 99.49,
+      "rule_amount_tolerance_passed": false,
+      "rule_currency_match_passed": true,
+      "amount_diff": 1.01
     }
   ]
 }
 ```
 
-### 5.5 Get Single Explanation Detail
+### 6.4 Query Unmatched Records
 
-```http
-GET /api/v1/explanations/{explanationId}
+```json
+GET /api/v1/jobs/{id}/unmatched-left?limit=100&offset=0
+
+Response 200:
+{
+  "total": 1000,
+  "limit": 100,
+  "offset": 0,
+  "data": [
+    {
+      "transaction_id": "TXN999",
+      "amount": 500.00,
+      "currency": "USD",
+      "timestamp": "2024-03-15T10:00:00Z"
+    }
+  ]
+}
 ```
 
-**Response:**
+### 6.5 Rule Statistics
+
 ```json
+GET /api/v1/jobs/{id}/stats
+
+Response 200:
 {
-  "id": "exp_abc123",
-  "runId": "run_def456",
-  "stageId": "stage_main",
-  "result": "MATCH_FAILED",
-  "leftKey": { "transaction_id": "TXN-500" },
-  "rightKey": { "ref_number": "REF-500" },
-  "leftRecord": {
-    "transaction_id": "TXN-500",
-    "amount": 100.50,
-    "currency": "USD",
-    "date": "2024-03-15"
-  },
-  "rightRecord": {
-    "ref_number": "REF-500",
-    "amount": 105.00,
-    "currency": "USD",
-    "date": "2024-03-15"
-  },
-  "ruleEvaluations": [
+  "job_id": "job-uuid-...",
+  "rules": [
     {
-      "ruleName": "Currency Match",
-      "result": "PASSED",
-      "leftValue": "USD",
-      "rightValue": "USD",
-      "humanText": "Currency matches: USD = USD"
+      "name": "amount_tolerance",
+      "passed": 23500,
+      "failed": 500,
+      "pass_rate": 0.979
     },
     {
-      "ruleName": "Amount Match",
-      "result": "FAILED",
-      "leftValue": 100.50,
-      "rightValue": 105.00,
-      "humanText": "Amount mismatch: $100.50 != $105.00 (difference: $4.50)"
-    }
-  ],
-  "summaryText": "Match failed: Amount mismatch ($4.50 difference)"
-}
-```
-
-### 5.6 Export Explanations
-
-```http
-POST /api/v1/runs/{runId}/explanations/export
-Content-Type: application/json
-```
-
-**Request Body:**
-```json
-{
-  "format": "csv",
-  "filter": {
-    "result": ["MATCH_FAILED"],
-    "stageId": "stage_main"
-  },
-  "fields": ["leftKey", "rightKey", "result", "summaryText"]
-}
-```
-
-**Response (202 Accepted):**
-```json
-{
-  "exportId": "export_xyz",
-  "status": "processing",
-  "estimatedRecords": 2000
-}
-```
-
-### 5.7 Get Export Status
-
-```http
-GET /api/v1/exports/{exportId}
-```
-
-**Response:**
-```json
-{
-  "exportId": "export_xyz",
-  "status": "completed",
-  "format": "csv",
-  "recordCount": 2000,
-  "fileSize": 256000,
-  "downloadUrl": "/api/v1/exports/export_xyz/download",
-  "expiresAt": "2024-03-16T10:00:00Z"
-}
-```
-
-## 6. Rules API
-
-### 6.1 Validate Rule Expression
-
-```http
-POST /api/v1/rules/validate
-Content-Type: application/json
-```
-
-**Request Body:**
-```json
-{
-  "rule": {
-    "type": "comparison",
-    "left": { "type": "field", "source": "left", "name": "amount" },
-    "operator": "=",
-    "right": { "type": "field", "source": "right", "name": "amount" }
-  },
-  "leftSchema": {
-    "fields": [
-      { "name": "amount", "type": "decimal" }
-    ]
-  },
-  "rightSchema": {
-    "fields": [
-      { "name": "amount", "type": "decimal" }
-    ]
-  }
-}
-```
-
-**Response:**
-```json
-{
-  "valid": true,
-  "warnings": [],
-  "errors": []
-}
-```
-
-### 6.2 Preview Rule (Dry Run)
-
-```http
-POST /api/v1/rules/preview
-Content-Type: application/json
-```
-
-**Request Body:**
-```json
-{
-  "rule": {...},
-  "sampleData": {
-    "left": [
-      { "amount": 100.50, "currency": "USD" }
-    ],
-    "right": [
-      { "amount": 100.48, "currency": "USD" }
-    ]
-  }
-}
-```
-
-**Response:**
-```json
-{
-  "results": [
-    {
-      "leftIndex": 0,
-      "rightIndex": 0,
-      "result": "MATCHED",
-      "explanation": {
-        "rules": [
-          {
-            "name": "Amount Tolerance",
-            "result": "PASSED",
-            "humanText": "Amount difference ($0.02) within tolerance ($0.05)"
-          }
-        ]
-      }
+      "name": "currency_match",
+      "passed": 24800,
+      "failed": 200,
+      "pass_rate": 0.992
     }
   ]
 }
 ```
 
-## 7. Error Responses
-
-### 7.1 Error Format
+### 6.6 Explain Match
 
 ```json
+GET /api/v1/jobs/{id}/explain/{record_id}
+
+Response 200:
 {
-  "error": {
-    "code": "VALIDATION_ERROR",
-    "message": "Invalid job configuration",
-    "details": [
-      {
-        "path": "stages[0].matchingRule",
-        "message": "Rule expression is required"
-      }
-    ],
-    "requestId": "req_abc123"
-  }
+  "record_id": "TXN001",
+  "match_status": "matched_with_exceptions",
+  "left_record": {
+    "transaction_id": "TXN001",
+    "amount": 100.50,
+    "currency": "USD"
+  },
+  "right_record": {
+    "txn_id": "TXN001",
+    "amount": 99.49,
+    "currency": "USD"
+  },
+  "rule_results": [
+    {
+      "rule": "amount_tolerance",
+      "passed": false,
+      "expected": "difference <= 0.01",
+      "actual": "difference = 1.01"
+    },
+    {
+      "rule": "currency_match",
+      "passed": true,
+      "expected": "currencies equal",
+      "actual": "USD == USD"
+    }
+  ]
 }
 ```
 
-### 7.2 HTTP Status Codes
+### 6.7 Export to CSV
+
+Export format is **CSV only**.
+
+```json
+POST /api/v1/jobs/{id}/export
+{
+  "category": "matched",
+  "filters": {
+    "rules_failed": ["amount_tolerance"]
+  },
+  "columns": ["transaction_id", "amount", "amount_right", "amount_diff"]
+}
+
+Response 200:
+{
+  "download_url": "https://storage.example.com/exports/job-uuid-matched.csv",
+  "expires_at": "2024-03-15T12:00:00Z",
+  "record_count": 523,
+  "file_size_bytes": 45678
+}
+```
+
+**CSV Output Format:**
+```csv
+transaction_id,amount,amount_right,amount_diff
+TXN001,100.50,99.49,1.01
+TXN002,250.00,249.95,0.05
+```
+
+## 7. Common Response Codes
 
 | Code | Description |
 |------|-------------|
 | 200 | Success |
 | 201 | Created |
-| 202 | Accepted (async operation started) |
-| 204 | No Content (successful delete) |
+| 202 | Accepted (async operation) |
 | 400 | Bad Request (validation error) |
 | 401 | Unauthorized |
 | 403 | Forbidden |
 | 404 | Not Found |
-| 409 | Conflict (e.g., job already running) |
-| 422 | Unprocessable Entity |
+| 409 | Conflict (e.g., duplicate name) |
 | 429 | Too Many Requests |
 | 500 | Internal Server Error |
 
-### 7.3 Error Codes
+## 8. Pagination
+
+All list endpoints support pagination:
+
+```json
+GET /api/v1/jobs?limit=20&offset=40&sort=created_at&order=desc
+
+Response 200:
+{
+  "total": 150,
+  "limit": 20,
+  "offset": 40,
+  "data": [...]
+}
+```
+
+## 9. Error Response Format
+
+```json
+{
+  "error": {
+    "code": "VALIDATION_ERROR",
+    "message": "Invalid request parameters",
+    "details": [
+      {
+        "field": "date_range.start",
+        "message": "Start date must be before end date"
+      }
+    ]
+  },
+  "request_id": "req-uuid-...",
+  "timestamp": "2024-03-15T10:00:00Z"
+}
+```
+
+### 9.1 Error Codes
 
 | Code | Description |
 |------|-------------|
 | `VALIDATION_ERROR` | Request body validation failed |
+| `DATASOURCE_NOT_FOUND` | Data source ID does not exist |
+| `RECONCILIATION_NOT_FOUND` | Reconciliation ID does not exist |
 | `JOB_NOT_FOUND` | Job ID does not exist |
-| `RUN_NOT_FOUND` | Run ID does not exist |
-| `JOB_ALREADY_RUNNING` | Cannot start new run |
+| `JOB_ALREADY_RUNNING` | Cannot start new job |
 | `DATASOURCE_ERROR` | Failed to connect to data source |
-| `RULE_COMPILATION_ERROR` | Invalid rule expression |
+| `RULE_COMPILATION_ERROR` | Invalid Polars expression |
 | `RATE_LIMIT_EXCEEDED` | Too many requests |

@@ -2,62 +2,67 @@
 
 ## 1. Overview
 
-The rule expression system enables non-technical users to define complex matching logic through a visual block-based interface. Rules are compiled from Block JSON to Lua for execution.
+The rule expression system enables non-technical users to define complex matching logic through a visual block-based interface. Rules are compiled from Block JSON to **Polars expressions** for high-performance execution.
 
 ## 2. Compilation Pipeline
 
-```mermaid
-flowchart TD
-    subgraph Visual["Visual Builder (Frontend)"]
-        Blocks["Drag & Drop<br/>Rule Blocks"]
-    end
-
-    subgraph BlockJSON["Block JSON (Intermediate)"]
-        AST["Structured AST<br/>(JSON Schema Validated)"]
-    end
-
-    subgraph Compilation["Compiler (Backend)"]
-        Parse["Parse Block JSON"]
-        Validate["Validate Schema"]
-        Optimize["Optimize AST"]
-        Generate["Generate Lua"]
-    end
-
-    subgraph Runtime["Execution (Sandboxed)"]
-        LuaVM["LuaJIT Runtime"]
-        Sandbox["Sandboxed Environment<br/>(No I/O, Limited Memory)"]
-    end
-
-    Blocks -->|"User saves"| AST
-    AST --> Parse
-    Parse --> Validate
-    Validate --> Optimize
-    Optimize --> Generate
-    Generate -->|"Cached"| LuaVM
-    LuaVM --> Sandbox
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                        Compilation Pipeline                             │
+│                                                                         │
+│  ┌────────────────────────────────────────────────────────────────┐    │
+│  │                   Visual Builder (Frontend)                     │    │
+│  │   Drag & Drop Rule Blocks → React Component Tree                │    │
+│  └──────────────────────────────┬─────────────────────────────────┘    │
+│                                 │                                       │
+│                                 ▼                                       │
+│  ┌────────────────────────────────────────────────────────────────┐    │
+│  │                   Block JSON (Intermediate)                     │    │
+│  │   Structured AST (JSON Schema Validated)                        │    │
+│  └──────────────────────────────┬─────────────────────────────────┘    │
+│                                 │                                       │
+│                                 ▼                                       │
+│  ┌────────────────────────────────────────────────────────────────┐    │
+│  │                   Compiler (Python)                             │    │
+│  │   ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────────┐   │    │
+│  │   │  Parse   │→ │ Validate │→ │ Optimize │→ │  Generate    │   │    │
+│  │   │  JSON    │  │  Schema  │  │   AST    │  │  Polars Expr │   │    │
+│  │   └──────────┘  └──────────┘  └──────────┘  └──────────────┘   │    │
+│  └──────────────────────────────┬─────────────────────────────────┘    │
+│                                 │                                       │
+│                                 ▼                                       │
+│  ┌────────────────────────────────────────────────────────────────┐    │
+│  │                   Execution (Polars)                            │    │
+│  │   pl.col() expressions → Columnar evaluation → Boolean result   │    │
+│  └────────────────────────────────────────────────────────────────┘    │
+└─────────────────────────────────────────────────────────────────────────┘
 ```
 
 ## 3. Block Types
 
-```mermaid
-flowchart TD
-    subgraph Blocks["Available Block Types"]
-        Comparison["Comparison Block<br/>field = field<br/>field != value<br/>field > value"]
-        Boolean["Boolean Block<br/>AND / OR / NOT"]
-        Function["Function Block<br/>abs() / round()<br/>upper() / lower()"]
-        Arithmetic["Arithmetic Block<br/>+ / - / * / /"]
-        DateTime["DateTime Block<br/>days_between()<br/>timestamp_diff()"]
-    end
-
-    subgraph Composition["Rule Composition"]
-        Rule["Complete Rule"]
-    end
-
-    Comparison --> Rule
-    Boolean --> Rule
-    Function --> Rule
-    Arithmetic --> Rule
-    DateTime --> Rule
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                        Available Block Types                            │
+│                                                                         │
+│  ┌──────────────────┐  ┌──────────────────┐  ┌──────────────────┐      │
+│  │   Comparison     │  │    Boolean       │  │    Function      │      │
+│  │   field = field  │  │    AND / OR      │  │    abs() round() │      │
+│  │   field != value │  │    NOT           │  │    upper() lower()│     │
+│  │   field > value  │  │                  │  │                  │      │
+│  └──────────────────┘  └──────────────────┘  └──────────────────┘      │
+│                                                                         │
+│  ┌──────────────────┐  ┌──────────────────┐                            │
+│  │   Arithmetic     │  │   DateTime       │                            │
+│  │   + / - / * / /  │  │   days_between() │                            │
+│  │                  │  │   timestamp_diff()│                           │
+│  └──────────────────┘  └──────────────────┘                            │
+│                                                                         │
+│                    ▼   ▼   ▼   ▼   ▼                                   │
+│              ┌─────────────────────────┐                               │
+│              │    Complete Rule        │                               │
+│              │  (Polars Expression)    │                               │
+│              └─────────────────────────┘                               │
+└─────────────────────────────────────────────────────────────────────────┘
 ```
 
 ### 3.1 Comparison Block
@@ -91,17 +96,17 @@ Combines multiple conditions.
 
 Transforms values before comparison.
 
-| Function | Description | Example |
-|----------|-------------|---------|
-| `abs(x)` | Absolute value | `abs(amount_a - amount_b) <= 0.01` |
-| `round(x, n)` | Round to n decimals | `round(amount, 2)` |
-| `floor(x)` | Round down | `floor(percentage)` |
-| `ceil(x)` | Round up | `ceil(quantity)` |
-| `upper(s)` | Uppercase | `upper(currency)` |
-| `lower(s)` | Lowercase | `lower(name)` |
-| `trim(s)` | Remove whitespace | `trim(description)` |
-| `len(s)` | String length | `len(reference) > 0` |
-| `coalesce(a, b)` | First non-null | `coalesce(alt_id, id)` |
+| Function | Description | Polars Mapping |
+|----------|-------------|----------------|
+| `abs(x)` | Absolute value | `.abs()` |
+| `round(x, n)` | Round to n decimals | `.round(n)` |
+| `floor(x)` | Round down | `.floor()` |
+| `ceil(x)` | Round up | `.ceil()` |
+| `upper(s)` | Uppercase | `.str.to_uppercase()` |
+| `lower(s)` | Lowercase | `.str.to_lowercase()` |
+| `trim(s)` | Remove whitespace | `.str.strip_chars()` |
+| `len(s)` | String length | `.str.len_chars()` |
+| `coalesce(a, b)` | First non-null | `pl.coalesce()` |
 
 ### 3.4 Arithmetic Block
 
@@ -119,13 +124,13 @@ Mathematical operations.
 
 Date and time operations.
 
-| Function | Description | Example |
-|----------|-------------|---------|
-| `days_between(a, b)` | Days difference | `days_between(date_a, date_b) <= 3` |
-| `hours_between(a, b)` | Hours difference | `hours_between(time_a, time_b) <= 24` |
-| `date_part(d, 'year')` | Extract part | `date_part(txn_date, 'month') = 3` |
-| `date_add(d, n, 'days')` | Add interval | `date_add(created, 7, 'days')` |
-| `date_trunc(d, 'day')` | Truncate | `date_trunc(timestamp, 'day')` |
+| Function | Description | Polars Mapping |
+|----------|-------------|----------------|
+| `days_between(a, b)` | Days difference | `(b - a).dt.total_days()` |
+| `hours_between(a, b)` | Hours difference | `(b - a).dt.total_hours()` |
+| `date_part(d, 'year')` | Extract part | `.dt.year()` / `.dt.month()` |
+| `date_add(d, n, 'days')` | Add interval | `+ pl.duration(days=n)` |
+| `date_trunc(d, 'day')` | Truncate | `.dt.truncate()` |
 
 ## 4. Block JSON Schema
 
@@ -213,12 +218,15 @@ interface LiteralValue {
 }
 ```
 
-**Compiled Lua**:
-```lua
-function evaluate(left, right)
-  return (left.currency == right.currency) and
-         (math.abs(left.amount - right.amount) <= 0.01)
-end
+**Compiled Polars Expression**:
+```python
+import polars as pl
+
+# Generated expression
+rule_expr = (
+    (pl.col("currency") == pl.col("currency_right")) &
+    ((pl.col("amount") - pl.col("amount_right")).abs() <= 0.01)
+).alias("rule_passed")
 ```
 
 ## 5. JSON Schema Definition
@@ -333,69 +341,192 @@ end
 }
 ```
 
-## 6. Lua Code Generation
+## 6. Polars Expression Generation
 
 ### 6.1 Generation Rules
 
-| Block Type | Lua Output |
-|------------|------------|
-| `field` (left) | `left.fieldName` |
-| `field` (right) | `right.fieldName` |
-| `literal` (string) | `"value"` |
-| `literal` (number) | `value` |
-| `literal` (boolean) | `true` / `false` |
-| `literal` (null) | `nil` |
+| Block Type | Polars Output |
+|------------|---------------|
+| `field` (left) | `pl.col("fieldName")` |
+| `field` (right) | `pl.col("fieldName_right")` |
+| `literal` (string) | `pl.lit("value")` |
+| `literal` (number) | `pl.lit(value)` |
+| `literal` (boolean) | `pl.lit(True)` / `pl.lit(False)` |
+| `literal` (null) | `pl.lit(None)` |
 | `comparison` (=) | `left == right` |
-| `comparison` (!=) | `left ~= right` |
-| `boolean` (AND) | `(a) and (b)` |
-| `boolean` (OR) | `(a) or (b)` |
-| `boolean` (NOT) | `not (a)` |
+| `comparison` (!=) | `left != right` |
+| `comparison` (>) | `left > right` |
+| `comparison` (contains) | `left.str.contains(right)` |
+| `comparison` (starts_with) | `left.str.starts_with(right)` |
+| `comparison` (ends_with) | `left.str.ends_with(right)` |
+| `comparison` (matches) | `left.str.contains(right)` (regex) |
+| `boolean` (AND) | `(a) & (b)` |
+| `boolean` (OR) | `(a) \| (b)` |
+| `boolean` (NOT) | `~(a)` |
 | `arithmetic` | `(left op right)` |
-| `function` | `func_name(args)` |
+| `function` | Mapped to Polars method |
 
-### 6.2 Generated Function Template
+### 6.2 Expression Compiler
 
-```lua
--- Auto-generated matching rule
--- Hash: sha256_of_block_json
--- Generated: 2024-03-15T10:00:00Z
+```python
+import polars as pl
+from typing import Union
 
-local function evaluate(left, right)
-  -- Compiled rule expression
-  return {{EXPRESSION}}
-end
+def compile_block(node: dict, right_suffix: str = "_right") -> pl.Expr:
+    """Compile Block JSON to Polars expression."""
 
-return {
-  evaluate = evaluate
-}
+    node_type = node["type"]
+
+    if node_type == "field":
+        col_name = node["name"]
+        if node["source"] == "right":
+            col_name = f"{col_name}{right_suffix}"
+        return pl.col(col_name)
+
+    elif node_type == "literal":
+        return pl.lit(node["value"])
+
+    elif node_type == "comparison":
+        left = compile_block(node["left"], right_suffix)
+        right = compile_block(node["right"], right_suffix)
+        op = node["operator"]
+
+        if op == "=":
+            return left == right
+        elif op == "!=":
+            return left != right
+        elif op == ">":
+            return left > right
+        elif op == ">=":
+            return left >= right
+        elif op == "<":
+            return left < right
+        elif op == "<=":
+            return left <= right
+        elif op == "contains":
+            return left.str.contains(right)
+        elif op == "starts_with":
+            return left.str.starts_with(right)
+        elif op == "ends_with":
+            return left.str.ends_with(right)
+        elif op == "matches":
+            return left.str.contains(right)
+
+    elif node_type == "boolean":
+        children = [compile_block(c, right_suffix) for c in node["children"]]
+        op = node["operator"]
+
+        if op == "AND":
+            result = children[0]
+            for child in children[1:]:
+                result = result & child
+            return result
+        elif op == "OR":
+            result = children[0]
+            for child in children[1:]:
+                result = result | child
+            return result
+        elif op == "NOT":
+            return ~children[0]
+
+    elif node_type == "arithmetic":
+        left = compile_block(node["left"], right_suffix)
+        right = compile_block(node["right"], right_suffix)
+        op = node["operator"]
+
+        if op == "+":
+            return left + right
+        elif op == "-":
+            return left - right
+        elif op == "*":
+            return left * right
+        elif op == "/":
+            return left / right
+        elif op == "%":
+            return left % right
+
+    elif node_type == "function":
+        args = [compile_block(a, right_suffix) for a in node["args"]]
+        name = node["name"]
+
+        if name == "abs":
+            return args[0].abs()
+        elif name == "round":
+            decimals = args[1] if len(args) > 1 else pl.lit(0)
+            return args[0].round(decimals)
+        elif name == "floor":
+            return args[0].floor()
+        elif name == "ceil":
+            return args[0].ceil()
+        elif name == "upper":
+            return args[0].str.to_uppercase()
+        elif name == "lower":
+            return args[0].str.to_lowercase()
+        elif name == "trim":
+            return args[0].str.strip_chars()
+        elif name == "len":
+            return args[0].str.len_chars()
+        elif name == "coalesce":
+            return pl.coalesce(args)
+        elif name == "days_between":
+            return (args[1] - args[0]).dt.total_days()
+        elif name == "hours_between":
+            return (args[1] - args[0]).dt.total_hours()
+        elif name == "date_part":
+            part = node["args"][1]["value"]
+            if part == "year":
+                return args[0].dt.year()
+            elif part == "month":
+                return args[0].dt.month()
+            elif part == "day":
+                return args[0].dt.day()
+        elif name == "date_trunc":
+            unit = node["args"][1]["value"]
+            return args[0].dt.truncate(unit)
+
+    raise ValueError(f"Unknown node type: {node_type}")
 ```
 
-### 6.3 Helper Functions
+### 6.3 Usage Example
 
-The Lua runtime includes pre-loaded helper functions:
+```python
+import polars as pl
 
-```lua
--- String operations
-function contains(str, substr)
-  return string.find(str, substr, 1, true) ~= nil
-end
+# Block JSON from visual builder
+block_json = {
+    "type": "boolean",
+    "operator": "AND",
+    "children": [
+        {
+            "type": "comparison",
+            "left": {"type": "field", "source": "left", "name": "currency"},
+            "operator": "=",
+            "right": {"type": "field", "source": "right", "name": "currency"}
+        },
+        {
+            "type": "comparison",
+            "left": {
+                "type": "function",
+                "name": "abs",
+                "args": [{
+                    "type": "arithmetic",
+                    "operator": "-",
+                    "left": {"type": "field", "source": "left", "name": "amount"},
+                    "right": {"type": "field", "source": "right", "name": "amount"}
+                }]
+            },
+            "operator": "<=",
+            "right": {"type": "literal", "value": 0.01}
+        }
+    ]
+}
 
-function starts_with(str, prefix)
-  return string.sub(str, 1, #prefix) == prefix
-end
+# Compile to Polars expression
+rule_expr = compile_block(block_json).alias("amount_match_passed")
 
-function ends_with(str, suffix)
-  return string.sub(str, -#suffix) == suffix
-end
-
--- Date operations
-function days_between(date1, date2)
-  return math.floor((date2 - date1) / 86400)
-end
-
-function hours_between(time1, time2)
-  return math.floor((time2 - time1) / 3600)
-end
+# Apply to joined DataFrame
+joined = left_df.join(right_df, on="id", suffix="_right")
+result = joined.with_columns(rule_expr)
 ```
 
 ## 7. Validation
@@ -410,7 +541,44 @@ end
 - Type compatibility (comparing string to number)
 - Circular reference detection
 
-### 7.3 Error Messages
+### 7.3 Validation Implementation
+
+```python
+def validate_block(node: dict, left_schema: dict, right_schema: dict) -> list[dict]:
+    """Validate Block JSON against source schemas."""
+    errors = []
+
+    if node["type"] == "field":
+        source = node["source"]
+        field_name = node["name"]
+        schema = left_schema if source == "left" else right_schema
+
+        if field_name not in schema["fields"]:
+            # Find similar field names
+            similar = find_similar(field_name, schema["fields"].keys())
+            suggestion = f" Did you mean '{similar}'?" if similar else ""
+            errors.append({
+                "path": f"$.{source}.{field_name}",
+                "message": f"Field '{field_name}' not found in {source} schema.{suggestion}",
+                "code": "FIELD_NOT_FOUND"
+            })
+
+    elif node["type"] in ("comparison", "arithmetic"):
+        errors.extend(validate_block(node["left"], left_schema, right_schema))
+        errors.extend(validate_block(node["right"], left_schema, right_schema))
+
+    elif node["type"] == "boolean":
+        for child in node["children"]:
+            errors.extend(validate_block(child, left_schema, right_schema))
+
+    elif node["type"] == "function":
+        for arg in node["args"]:
+            errors.extend(validate_block(arg, left_schema, right_schema))
+
+    return errors
+```
+
+### 7.4 Error Response
 
 ```json
 {
@@ -428,22 +596,88 @@ end
 ## 8. Optimization
 
 ### 8.1 Constant Folding
-```json
-// Before: abs(-5)
+
+```python
+# Before: abs(-5)
 { "type": "function", "name": "abs", "args": [{ "type": "literal", "value": -5 }] }
 
-// After: 5
+# After: 5
 { "type": "literal", "value": 5 }
 ```
 
-### 8.2 Short-Circuit Evaluation
-```lua
--- AND: Stop on first false
--- OR: Stop on first true
-return (fast_check) and (slow_check)
+### 8.2 Polars Query Optimization
+Polars automatically optimizes expression trees:
+- Predicate pushdown
+- Column pruning
+- Common subexpression elimination
+- Parallel execution
+
+### 8.3 Lazy Evaluation
+
+```python
+# Expressions are built lazily
+rule_exprs = [compile_block(rule) for rule in rules]
+
+# Add all rule columns at once
+result = joined.with_columns(rule_exprs)
+
+# Execute only when collecting
+final = result.collect()  # All optimizations applied
 ```
 
-### 8.3 Caching
-- Compiled Lua bytecode cached by Block JSON hash
-- Cache invalidation on schema changes
-- LRU eviction for memory management
+## 9. Complex Rules with Numba
+
+For rules that cannot be expressed as Polars expressions, use Numba JIT:
+
+```python
+import numba
+
+@numba.jit(nopython=True)
+def validate_tiered_fee(amount: float, fee: float) -> bool:
+    """Custom tiered fee validation logic."""
+    if amount <= 100:
+        expected = 2.50
+    elif amount <= 1000:
+        expected = 5.00
+    else:
+        expected = amount * 0.005
+    return abs(expected - fee) <= 0.10
+
+# Apply via map_elements
+result = joined.with_columns(
+    pl.struct(["amount", "fee_amount"])
+      .map_elements(
+          lambda x: validate_tiered_fee(x["amount"], x["fee_amount"]),
+          return_dtype=pl.Boolean
+      )
+      .alias("fee_validation_passed")
+)
+```
+
+## 10. Expression Caching
+
+Compiled expressions are cached for performance:
+
+```python
+import hashlib
+import json
+
+class ExpressionCache:
+    def __init__(self):
+        self._cache = {}
+
+    def get_or_compile(self, block_json: dict) -> pl.Expr:
+        """Get cached expression or compile new one."""
+        cache_key = hashlib.sha256(
+            json.dumps(block_json, sort_keys=True).encode()
+        ).hexdigest()
+
+        if cache_key not in self._cache:
+            self._cache[cache_key] = compile_block(block_json)
+
+        return self._cache[cache_key]
+
+    def invalidate(self):
+        """Clear cache (e.g., on schema changes)."""
+        self._cache.clear()
+```

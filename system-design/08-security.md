@@ -1,171 +1,94 @@
-# Security Considerations
+# Security
 
 ## 1. Overview
 
-Security is critical for a financial reconciliation system handling sensitive transaction data. This document covers:
-- Lua sandbox security
-- API authentication and authorization
-- Data protection
-- Audit logging
+The reconciliation engine is a **single-tenant application** deployed per organization. Security is simplified compared to multi-tenant architectures while maintaining enterprise-grade protection.
 
-## 2. Lua Sandbox
-
-The Lua runtime is sandboxed to prevent malicious code execution from user-defined rules.
-
-```mermaid
-flowchart TD
-    subgraph Allowed["Allowed in Sandbox"]
-        Math["math.*<br/>(abs, floor, ceil)"]
-        String["string.*<br/>(upper, lower, sub)"]
-        Table["table.*<br/>(insert, remove)"]
-        Custom["Custom functions<br/>(days_between, etc.)"]
-    end
-
-    subgraph Blocked["Blocked"]
-        IO["io.*<br/>(file access)"]
-        OS["os.*<br/>(system calls)"]
-        Package["package.*<br/>(require)"]
-        Load["load/loadfile<br/>(code injection)"]
-        Debug["debug.*<br/>(introspection)"]
-    end
-
-    subgraph Limits["Resource Limits"]
-        Memory["Memory: 50MB"]
-        Time["Timeout: 5s/record"]
-        Instructions["Instruction limit"]
-    end
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                         Security Architecture                                │
+│                                                                              │
+│  ┌─────────────────────────────────────────────────────────────────────────┐│
+│  │                        Authentication Layer                              ││
+│  │   OAuth 2.0 / SSO → JWT Tokens → Spring Security                        ││
+│  └─────────────────────────────────────────────────────────────────────────┘│
+│                                    │                                         │
+│                                    ▼                                         │
+│  ┌─────────────────────────────────────────────────────────────────────────┐│
+│  │                        Authorization Layer                               ││
+│  │   RBAC (Roles) → Permissions → Resource-Level Access                    ││
+│  └─────────────────────────────────────────────────────────────────────────┘│
+│                                    │                                         │
+│                                    ▼                                         │
+│  ┌─────────────────────────────────────────────────────────────────────────┐│
+│  │                        Data Protection                                   ││
+│  │   Encryption at Rest (AES-256) → Encryption in Transit (TLS 1.2+)       ││
+│  │   Credential Storage → Data Masking → PII Handling                      ││
+│  └─────────────────────────────────────────────────────────────────────────┘│
+│                                    │                                         │
+│                                    ▼                                         │
+│  ┌─────────────────────────────────────────────────────────────────────────┐│
+│  │                        Audit & Compliance                                ││
+│  │   Audit Logging → Security Alerts → Compliance (SOC 2, GDPR)            ││
+│  └─────────────────────────────────────────────────────────────────────────┘│
+└─────────────────────────────────────────────────────────────────────────────┘
 ```
 
-### 2.1 Allowed Functions
+## 2. Single-Tenant Deployment
 
-| Category | Functions | Purpose |
-|----------|-----------|---------|
-| **Math** | `abs`, `floor`, `ceil`, `round`, `max`, `min`, `sqrt` | Numeric calculations |
-| **String** | `upper`, `lower`, `sub`, `len`, `find`, `gsub`, `format` | String manipulation |
-| **Table** | `insert`, `remove`, `concat`, `sort` | Collection operations |
-| **Type** | `type`, `tonumber`, `tostring` | Type conversion |
-| **Custom** | `days_between`, `hours_between`, `coalesce`, `contains` | Domain-specific |
+The application is deployed as a dedicated instance per organization:
 
-### 2.2 Blocked Functions
+```yaml
+deployment:
+  type: single_tenant
+  organization: "Acme Financial Services"
+  environment: production
 
-| Function | Risk | Blocked |
-|----------|------|---------|
-| `io.*` | File system access | All |
-| `os.execute` | Command execution | Yes |
-| `os.remove` | File deletion | Yes |
-| `os.rename` | File modification | Yes |
-| `os.exit` | Process termination | Yes |
-| `os.getenv` | Environment leakage | Yes |
-| `package.*` | Module loading | All |
-| `require` | External code | Yes |
-| `load`, `loadfile`, `loadstring` | Code injection | Yes |
-| `dofile` | External execution | Yes |
-| `debug.*` | Runtime introspection | All |
-| `rawget`, `rawset` | Metatable bypass | Yes |
-| `setmetatable` | Metatable modification | Yes |
-| `collectgarbage` | GC manipulation | Yes |
-
-### 2.3 Safe Functions Whitelist
-
-```go
-// Go implementation of Lua sandbox
-func createSandboxedState() *lua.LState {
-    L := lua.NewState(lua.Options{
-        SkipOpenLibs: true, // Don't load any libs by default
-    })
-
-    // Load only safe base functions
-    for _, fn := range []string{"type", "tonumber", "tostring", "pairs", "ipairs", "next", "select", "unpack"} {
-        L.SetGlobal(fn, L.GetGlobal(fn))
-    }
-
-    // Load safe math functions
-    mathLib := L.NewTable()
-    safeMath := []string{"abs", "floor", "ceil", "max", "min", "sqrt", "pow", "fmod"}
-    for _, fn := range safeMath {
-        mathLib.RawSetString(fn, lua.LuaMath.RawGetString(fn))
-    }
-    L.SetGlobal("math", mathLib)
-
-    // Load safe string functions
-    stringLib := L.NewTable()
-    safeString := []string{"upper", "lower", "sub", "len", "find", "gsub", "format", "byte", "char"}
-    for _, fn := range safeString {
-        stringLib.RawSetString(fn, lua.LuaString.RawGetString(fn))
-    }
-    L.SetGlobal("string", stringLib)
-
-    // Add custom domain functions
-    addCustomFunctions(L)
-
-    return L
-}
+  isolation:
+    database: dedicated       # Dedicated PostgreSQL instance
+    storage: dedicated        # Dedicated S3 bucket
+    compute: dedicated        # Dedicated K8s namespace
+    network: isolated         # Network policies
 ```
 
-### 2.4 Resource Limits
+### 2.1 Benefits
 
-```go
-// Execution limits
-type SandboxConfig struct {
-    MaxMemoryBytes    int64         // 50MB default
-    MaxExecutionTime  time.Duration // 5s per record
-    MaxInstructions   int64         // 10M instructions
-    MaxStringLength   int           // 1MB
-    MaxTableSize      int           // 100K entries
-}
+| Aspect | Single-Tenant Advantage |
+|--------|------------------------|
+| **Security** | Complete data isolation, no cross-tenant risks |
+| **Compliance** | Simplified audit scope, dedicated resources |
+| **Performance** | No noisy neighbor issues |
+| **Customization** | Per-organization configuration |
 
-// Enforce limits during execution
-func executeWithLimits(L *lua.LState, config SandboxConfig) error {
-    // Set memory limit
-    L.SetMx(config.MaxMemoryBytes)
+## 3. Authentication
 
-    // Set instruction count hook
-    instructionCount := int64(0)
-    L.SetHook(func(L *lua.LState, ar *lua.Debug) {
-        instructionCount++
-        if instructionCount > config.MaxInstructions {
-            L.RaiseError("instruction limit exceeded")
-        }
-    }, lua.HookCount, 1000)
+### 3.1 OAuth 2.0 / SSO Integration
 
-    // Execute with timeout
-    ctx, cancel := context.WithTimeout(context.Background(), config.MaxExecutionTime)
-    defer cancel()
+Spring Security configuration for OAuth 2.0:
 
-    L.SetContext(ctx)
-    return L.PCall(0, lua.MultRet, nil)
-}
+```yaml
+# application.yml
+spring:
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          issuer-uri: https://auth.company.com
+          jwk-set-uri: https://auth.company.com/.well-known/jwks.json
+
+# OAuth2 client configuration
+authentication:
+  provider: oauth2
+  authorization_endpoint: https://auth.company.com/oauth/authorize
+  token_endpoint: https://auth.company.com/oauth/token
+  userinfo_endpoint: https://auth.company.com/oauth/userinfo
+  scopes:
+    - reconciliation:read
+    - reconciliation:write
+    - reconciliation:admin
 ```
 
-## 3. API Security
-
-```mermaid
-flowchart LR
-    subgraph Auth["Authentication"]
-        JWT["JWT Tokens"]
-        OAuth["OAuth2 / OIDC"]
-    end
-
-    subgraph AuthZ["Authorization"]
-        RBAC["Role-Based Access"]
-        Tenant["Tenant Isolation"]
-    end
-
-    subgraph Protection["Protection"]
-        RateLimit["Rate Limiting"]
-        Validation["Input Validation"]
-        Audit["Audit Logging"]
-    end
-
-    Request --> Auth
-    Auth --> AuthZ
-    AuthZ --> Protection
-    Protection --> Handler
-```
-
-### 3.1 Authentication
-
-#### JWT Token Structure
+### 3.2 JWT Token Structure
 
 ```json
 {
@@ -174,176 +97,264 @@ flowchart LR
     "typ": "JWT"
   },
   "payload": {
-    "sub": "user_abc123",
-    "iss": "recon-engine",
-    "aud": "recon-api",
+    "sub": "user@company.com",
+    "iss": "https://auth.company.com",
+    "aud": "reconciliation-api",
     "exp": 1710547200,
     "iat": 1710460800,
-    "tenant_id": "tenant_xyz",
-    "roles": ["admin", "operator"],
-    "permissions": ["jobs:read", "jobs:write", "runs:execute"]
+    "roles": ["analyst", "data_viewer"],
+    "scope": "reconciliation:read reconciliation:write"
   }
 }
 ```
 
-#### Authentication Middleware
+### 3.3 Spring Security Configuration
 
-```go
-func AuthMiddleware() gin.HandlerFunc {
-    return func(c *gin.Context) {
-        token := extractToken(c.GetHeader("Authorization"))
-        if token == "" {
-            c.AbortWithStatusJSON(401, gin.H{"error": "missing token"})
-            return
-        }
+```java
+@Configuration
+@EnableWebSecurity
+public class SecurityConfig {
 
-        claims, err := validateToken(token)
-        if err != nil {
-            c.AbortWithStatusJSON(401, gin.H{"error": "invalid token"})
-            return
-        }
+    @Bean
+    public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
+        http
+            .csrf(csrf -> csrf.disable())
+            .authorizeHttpRequests(auth -> auth
+                .requestMatchers("/actuator/health/**").permitAll()
+                .requestMatchers("/api/**").authenticated()
+            )
+            .oauth2ResourceServer(oauth2 -> oauth2
+                .jwt(jwt -> jwt.jwtAuthenticationConverter(jwtAuthConverter()))
+            )
+            .sessionManagement(session -> session
+                .sessionCreationPolicy(SessionCreationPolicy.STATELESS)
+            );
 
-        c.Set("user_id", claims.Subject)
-        c.Set("tenant_id", claims.TenantID)
-        c.Set("roles", claims.Roles)
-        c.Set("permissions", claims.Permissions)
-        c.Next()
+        return http.build();
+    }
+
+    @Bean
+    public JwtAuthenticationConverter jwtAuthConverter() {
+        JwtGrantedAuthoritiesConverter converter = new JwtGrantedAuthoritiesConverter();
+        converter.setAuthoritiesClaimName("roles");
+        converter.setAuthorityPrefix("ROLE_");
+
+        JwtAuthenticationConverter jwtConverter = new JwtAuthenticationConverter();
+        jwtConverter.setJwtGrantedAuthoritiesConverter(converter);
+        return jwtConverter;
     }
 }
 ```
 
-### 3.2 Authorization (RBAC)
+### 3.4 Session Management
 
-#### Roles and Permissions
+```yaml
+session:
+  timeout: 3600              # 1 hour
+  refresh_before_expiry: 300  # Refresh 5 minutes before expiration
+  max_concurrent_sessions: 3
+```
+
+## 4. Authorization (RBAC)
+
+### 4.1 Predefined Roles
 
 | Role | Permissions |
 |------|-------------|
-| **viewer** | `jobs:read`, `runs:read`, `reports:read` |
-| **operator** | viewer + `runs:execute`, `runs:cancel` |
-| **editor** | operator + `jobs:write`, `jobs:delete` |
-| **admin** | editor + `users:manage`, `settings:manage` |
+| `viewer` | View reconciliation results, export data |
+| `analyst` | Run reconciliations, create queries, view all results |
+| `admin` | Configure sources, rules, schemas, manage users |
 
-#### Permission Checks
+### 4.2 Granular Permissions
 
-```go
-func RequirePermission(permission string) gin.HandlerFunc {
-    return func(c *gin.Context) {
-        permissions := c.GetStringSlice("permissions")
-        if !contains(permissions, permission) {
-            c.AbortWithStatusJSON(403, gin.H{
-                "error": "insufficient permissions",
-                "required": permission,
-            })
-            return
-        }
-        c.Next()
+| Permission | Description |
+|------------|-------------|
+| `reconciliation:read` | View reconciliation configurations and results |
+| `reconciliation:write` | Create and modify reconciliation configurations |
+| `reconciliation:execute` | Run reconciliations |
+| `reconciliation:delete` | Delete reconciliations and results |
+| `datasource:read` | View data source configurations |
+| `datasource:write` | Create and modify data sources |
+| `datasource:test` | Test data source connections |
+| `schema:read` | View schemas |
+| `schema:write` | Create and modify schemas |
+| `rules:read` | View matching rules |
+| `rules:write` | Create and modify matching rules |
+| `audit:read` | View audit logs |
+
+### 4.3 Permission Enforcement
+
+```java
+@RestController
+@RequestMapping("/api/reconciliations")
+public class ReconciliationController {
+
+    @GetMapping
+    @PreAuthorize("hExpression CompilerasAuthority('reconciliation:read')")
+    public List<Reconciliation> list() {
+        return reconciliationService.findAll();
     }
-}
 
-// Usage
-router.POST("/jobs", RequirePermission("jobs:write"), createJob)
-router.POST("/jobs/:id/run", RequirePermission("runs:execute"), runJob)
-```
+    @PostMapping
+    @PreAuthorize("hasAuthority('reconciliation:write')")
+    public Reconciliation create(@RequestBody ReconciliationRequest request) {
+        return reconciliationService.create(request);
+    }
 
-### 3.3 Tenant Isolation
+    @PostMapping("/{id}/run")
+    @PreAuthorize("hasAuthority('reconciliation:execute')")
+    public RunStatus run(@PathVariable String id) {
+        return reconciliationService.run(id);
+    }
 
-```go
-// Ensure all queries are scoped to tenant
-func TenantScope(c *gin.Context) *gorm.DB {
-    tenantID := c.GetString("tenant_id")
-    return db.Where("tenant_id = ?", tenantID)
-}
-
-// Example usage
-func getJobs(c *gin.Context) {
-    var jobs []Job
-    TenantScope(c).Find(&jobs)
-    c.JSON(200, jobs)
-}
-```
-
-### 3.4 Rate Limiting
-
-```go
-// Per-tenant rate limits
-var rateLimits = map[string]rate.Limit{
-    "api:read":     100,  // 100 req/sec
-    "api:write":    20,   // 20 req/sec
-    "runs:execute": 5,    // 5 runs/sec
-}
-
-func RateLimitMiddleware(limitKey string) gin.HandlerFunc {
-    return func(c *gin.Context) {
-        tenantID := c.GetString("tenant_id")
-        key := fmt.Sprintf("%s:%s", tenantID, limitKey)
-
-        limiter := getLimiter(key, rateLimits[limitKey])
-        if !limiter.Allow() {
-            c.AbortWithStatusJSON(429, gin.H{
-                "error": "rate limit exceeded",
-                "retry_after": limiter.RetryAfter(),
-            })
-            return
-        }
-        c.Next()
+    @DeleteMapping("/{id}")
+    @PreAuthorize("hasAuthority('reconciliation:delete')")
+    public void delete(@PathVariable String id) {
+        reconciliationService.delete(id);
     }
 }
 ```
 
-## 4. Data Protection
+## 5. Expression Security
 
-### 4.1 Encryption at Rest
+### 5.1 Polars Expression Safety
+
+Unlike arbitrary code execution, Polars expressions are declarative and safe:
+
+```python
+# Block JSON is compiled to Polars expressions
+# No file I/O, no network access, no system calls
+
+# Safe operations only:
+rule_expr = (
+    (pl.col("currency") == pl.col("currency_right")) &
+    ((pl.col("amount") - pl.col("amount_right")).abs() <= 0.01)
+)
+```
+
+### 5.2 Numba JIT Security
+
+For complex rules using Numba JIT, functions are pre-approved:
+
+```python
+# Only pre-defined Numba functions are allowed
+# No arbitrary Python code execution
+
+ALLOWED_NUMBA_FUNCTIONS = {
+    "validate_tiered_fee",
+    "validate_fx_rate",
+    "validate_checksum",
+}
+
+def execute_custom_rule(func_name: str, *args):
+    if func_name not in ALLOWED_NUMBA_FUNCTIONS:
+        raise SecurityError(f"Function '{func_name}' not allowed")
+    return NUMBA_REGISTRY[func_name](*args)
+```
+
+### 5.3 AST Validation Pipeline
+
+User-provided Polars expressions are validated before execution using Python AST analysis:
+
+```python
+import ast
+import polars as pl
+
+ALLOWED_POLARS_METHODS = {
+    # Math
+    'abs', 'ceil', 'floor', 'round', 'sqrt', 'log', 'exp',
+    # String
+    'str.to_uppercase', 'str.to_lowercase', 'str.slice', 'str.strip_chars',
+    'str.replace', 'str.contains', 'str.starts_with', 'str.ends_with',
+    # Date
+    'dt.offset_by', 'dt.strptime', 'dt.convert_time_zone', 'dt.weekday',
+    'dt.year', 'dt.month', 'dt.day', 'dt.hour', 'dt.minute',
+    # Conditional
+    'when', 'then', 'otherwise', 'is_in', 'is_null', 'is_not_null',
+    # Aggregation
+    'sum', 'mean', 'count', 'min', 'max', 'first', 'last',
+}
+
+FORBIDDEN_CONSTRUCTS = {'Import', 'Call', 'Attribute'}  # Non-Polars calls
+
+def validate_expression(expr_str: str) -> bool:
+    """Validate expression contains only allowed Polars operations."""
+    try:
+        tree = ast.parse(expr_str, mode='eval')
+        # Walk AST and verify all calls are in ALLOWED_POLARS_METHODS
+        # Reject any import, open(), exec(), eval(), os.*, subprocess.*
+        return _validate_ast_node(tree)
+    except SyntaxError:
+        return False
+```
+
+### 5.4 Expression Sandboxing
+
+| Safeguard | Implementation |
+|-----------|----------------|
+| **Container Isolation** | Each job runs in ephemeral Kubernetes pod with no network egress |
+| **Resource Limits** | Hard limits on CPU (4 cores), memory (2GB), execution time (10 min) |
+| **Restricted Builtins** | Python `exec()`/`eval()` wrapped with restricted globals (no `__import__`, `open`, `os`, `subprocess`) |
+| **Allowlist-Only Functions** | Only approved Polars expression functions permitted |
+| **AST Validation** | Pre-parse expressions and reject any non-Polars constructs |
+| **Read-Only Data** | Job containers mount source data as read-only volumes |
+| **No Secrets in Environment** | Database credentials passed only to loader, not to expression evaluator |
+
+### 5.5 Resource Limits
+
+K8s Jobs have strict resource limits:
+
+```yaml
+resources:
+  requests:
+    memory: "2Gi"
+    cpu: "1000m"
+  limits:
+    memory: "8Gi"
+    cpu: "4000m"
+
+# Job timeout
+activeDeadlineSeconds: 3600
+
+# Execution context
+execution:
+  max_cpu_cores: 4
+  max_memory_gb: 2
+  max_execution_minutes: 10
+  network_egress: disabled
+```
+
+## 6. Data Protection
+
+### 6.1 Encryption at Rest
 
 | Data | Storage | Encryption |
 |------|---------|------------|
-| Job configs | PostgreSQL | AES-256 (TDE) |
-| Credentials | Secrets | Kubernetes Secrets (encrypted etcd) |
-| Results | S3/MinIO | Server-side encryption (SSE-S3) |
-| Audit logs | PostgreSQL | AES-256 |
+| Configurations | PostgreSQL | TDE (Transparent Data Encryption) |
+| Credentials | K8s Secrets | Encrypted etcd, external secret manager |
+| Source Data | S3 (Parquet) | SSE-S3 or SSE-KMS |
+| Results | S3 (Parquet) | SSE-S3 or SSE-KMS |
+| Audit Logs | PostgreSQL | AES-256 |
 
-### 4.2 Encryption in Transit
+### 6.2 Encryption in Transit
 
 ```yaml
-# TLS configuration
-tls:
-  enabled: true
-  minVersion: "1.2"
-  cipherSuites:
+network_security:
+  tls_version: "1.2"
+  cipher_suites:
     - TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384
     - TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256
+
+# All internal communication uses TLS
+# - Spring Boot ↔ PostgreSQL
+# - Polars Jobs ↔ S3
+# - Spring Boot ↔ Airbyte
 ```
 
-### 4.3 Sensitive Data Handling
-
-```go
-// Mask sensitive fields in logs
-type DataSource struct {
-    ID       string `json:"id"`
-    Name     string `json:"name"`
-    Type     string `json:"type"`
-    Config   Config `json:"config"`
-}
-
-type Config struct {
-    ConnectionString string `json:"connectionString,omitempty" log:"-"` // Never log
-    Password         string `json:"password,omitempty" log:"[REDACTED]"`
-    APIKey           string `json:"apiKey,omitempty" log:"[REDACTED]"`
-}
-
-// Redact before logging
-func (c Config) MarshalLog() map[string]interface{} {
-    return map[string]interface{}{
-        "connectionString": "[REDACTED]",
-        "password":         "[REDACTED]",
-        "apiKey":          "[REDACTED]",
-    }
-}
-```
-
-### 4.4 Secret Management
+### 6.3 Credential Storage
 
 ```yaml
-# External secrets operator
+# Kubernetes External Secrets Operator
 apiVersion: external-secrets.io/v1beta1
 kind: ExternalSecret
 metadata:
@@ -356,209 +367,318 @@ spec:
   target:
     name: recon-secrets
   data:
-    - secretKey: database-url
+    - secretKey: database-password
       remoteRef:
         key: recon/database
-        property: url
-    - secretKey: encryption-key
+        property: password
+    - secretKey: s3-secret-key
       remoteRef:
-        key: recon/encryption
-        property: key
+        key: recon/s3
+        property: secret_key
 ```
 
-## 5. Audit Logging
+### 6.4 Data Masking
 
-### 5.1 Audit Events
+Sensitive fields are masked in logs and UI:
 
-| Event | Logged Data |
-|-------|-------------|
-| `job.created` | Job ID, creator, config summary |
-| `job.updated` | Job ID, updater, changes |
-| `job.deleted` | Job ID, deleter |
-| `run.started` | Run ID, job ID, parameters |
-| `run.completed` | Run ID, status, summary |
-| `run.cancelled` | Run ID, canceller, reason |
-| `auth.login` | User ID, IP, method |
-| `auth.logout` | User ID |
-| `auth.failed` | Attempted user, IP, reason |
+```java
+@Component
+public class DataMaskingService {
 
-### 5.2 Audit Log Structure
+    private static final Map<String, MaskType> MASK_RULES = Map.of(
+        "card_number", MaskType.LAST4,
+        "account_number", MaskType.PARTIAL,
+        "ssn", MaskType.FULL,
+        "password", MaskType.FULL,
+        "api_key", MaskType.FULL
+    );
+
+    public String mask(String fieldName, String value) {
+        MaskType type = MASK_RULES.get(fieldName);
+        if (type == null) return value;
+
+        return switch (type) {
+            case LAST4 -> "************" + value.substring(value.length() - 4);
+            case PARTIAL -> value.substring(0, 4) + "****";
+            case FULL -> "********";
+        };
+    }
+}
+```
+
+### 6.5 Data Retention
+
+```yaml
+retention_policy:
+  reconciliation_results:
+    duration: 730 days  # 2 years
+    after_expiry: delete
+
+  audit_logs:
+    duration: 2555 days  # 7 years
+    after_expiry: archive
+
+  source_data:
+    duration: 90 days
+    after_expiry: delete
+
+  cleanup_schedule: "0 2 * * *"  # Daily at 2 AM
+```
+
+## 7. Audit Logging
+
+### 7.1 Logged Events
+
+| Event Category | Events |
+|----------------|--------|
+| **Authentication** | login, logout, failed_login, token_refresh |
+| **Authorization** | permission_denied, role_change |
+| **Reconciliation** | created, updated, deleted, executed, completed, failed |
+| **Data Source** | created, updated, deleted, sync_triggered, sync_completed |
+| **Configuration** | rule_created, rule_updated, schema_changed |
+| **Data Access** | result_viewed, result_exported, query_executed |
+
+### 7.2 Audit Log Structure
 
 ```json
 {
-  "id": "audit_abc123",
-  "timestamp": "2024-03-15T10:00:00Z",
-  "tenant_id": "tenant_xyz",
-  "event_type": "job.created",
-  "actor": {
-    "id": "user_def456",
-    "type": "user",
-    "ip": "192.168.1.100",
-    "user_agent": "Mozilla/5.0..."
-  },
-  "resource": {
-    "type": "job",
-    "id": "job_ghi789"
-  },
-  "action": "create",
-  "status": "success",
+  "event_id": "AUDIT-2024-03-15-0001",
+  "timestamp": "2024-03-15T12:00:00Z",
+  "user_id": "john.doe@company.com",
+  "event_type": "reconciliation_executed",
+  "action": "execute",
+  "resource_type": "reconciliation",
+  "resource_id": "recon_payment_gateway",
+  "source_ip": "192.168.1.100",
+  "user_agent": "Mozilla/5.0...",
+  "result": "success",
   "details": {
-    "job_name": "Daily Reconciliation",
-    "stages_count": 2
-  },
-  "request_id": "req_jkl012"
+    "workflow_id": "wf_123",
+    "stages_count": 3,
+    "records_processed": 50000,
+    "duration_ms": 45000
+  }
 }
 ```
 
-### 5.3 Audit Log Implementation
+### 7.3 Audit Service Implementation
 
-```go
-func AuditLog(event AuditEvent) {
-    log := AuditLogEntry{
-        ID:        generateID(),
-        Timestamp: time.Now(),
-        TenantID:  event.TenantID,
-        EventType: event.Type,
-        Actor: Actor{
-            ID:        event.ActorID,
-            Type:      event.ActorType,
-            IP:        event.IP,
-            UserAgent: event.UserAgent,
-        },
-        Resource: Resource{
-            Type: event.ResourceType,
-            ID:   event.ResourceID,
-        },
-        Action:    event.Action,
-        Status:    event.Status,
-        Details:   event.Details,
-        RequestID: event.RequestID,
-    }
+```java
+@Service
+public class AuditService {
 
-    // Write to database
-    db.Create(&log)
+    private final AuditLogRepository repository;
+    private final ObjectMapper objectMapper;
 
-    // Also send to external SIEM if configured
-    if siemEnabled {
-        siem.Send(log)
+    public void log(AuditEvent event) {
+        AuditLog entry = AuditLog.builder()
+            .eventId(generateEventId())
+            .timestamp(Instant.now())
+            .userId(event.getUserId())
+            .eventType(event.getType())
+            .action(event.getAction())
+            .resourceType(event.getResourceType())
+            .resourceId(event.getResourceId())
+            .sourceIp(event.getSourceIp())
+            .userAgent(event.getUserAgent())
+            .result(event.getResult())
+            .details(objectMapper.writeValueAsString(event.getDetails()))
+            .build();
+
+        repository.save(entry);
     }
 }
 ```
 
-## 6. Input Validation
+### 7.4 Audit Log Retention
 
-### 6.1 Request Validation
+```yaml
+audit_retention:
+  duration: 2555 days  # 7 years for compliance
+  immutable: true
+  storage: append_only
+```
 
-```go
-type CreateJobRequest struct {
-    Name        string       `json:"name" binding:"required,min=1,max=255"`
-    Description string       `json:"description" binding:"max=2000"`
-    DataSources []DataSource `json:"dataSources" binding:"required,min=1,max=10,dive"`
-    Stages      []Stage      `json:"stages" binding:"required,min=1,max=20,dive"`
-}
+## 8. Security Alerts
 
-type Stage struct {
-    ID           string          `json:"id" binding:"required,alphanum,max=100"`
-    Name         string          `json:"name" binding:"required,max=255"`
-    MatchingRule json.RawMessage `json:"matchingRule" binding:"required"`
-}
+### 8.1 Alert Conditions
 
-func createJob(c *gin.Context) {
-    var req CreateJobRequest
-    if err := c.ShouldBindJSON(&req); err != nil {
-        c.JSON(400, gin.H{"error": formatValidationError(err)})
-        return
+| Condition | Threshold | Action |
+|-----------|-----------|--------|
+| Failed login attempts | 5 in 10 minutes | Lock account, notify admin |
+| Access from new IP | First access | Email notification |
+| Unusual export volume | > 100,000 records | Require approval |
+| Permission escalation | Any | Notify admin |
+| Job failure spike | > 5 failures in 1 hour | Alert ops team |
+
+### 8.2 Alert Configuration
+
+```yaml
+security_alerts:
+  - condition: failed_login_threshold
+    threshold: 5
+    window: 600 seconds
+    action:
+      - lock_account
+      - notify: admin@company.com
+
+  - condition: unusual_export
+    threshold: 100000 records
+    action:
+      - require_approval
+      - notify: admin@company.com
+
+  - condition: job_failure_spike
+    threshold: 5
+    window: 3600 seconds
+    action:
+      - notify: ops@company.com
+```
+
+## 9. Network Security
+
+### 9.1 Kubernetes Network Policies
+
+```yaml
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: recon-api-policy
+  namespace: recon
+spec:
+  podSelector:
+    matchLabels:
+      app: recon-api
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              name: ingress-nginx
+      ports:
+        - port: 8080
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              app: postgres
+      ports:
+        - port: 5432
+    - to:
+        - namespaceSelector: {}
+          podSelector:
+            matchLabels:
+              app: airbyte
+      ports:
+        - port: 8001
+```
+
+### 9.2 Pod Security Standards
+
+```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: recon-api
+spec:
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 1000
+    fsGroup: 1000
+  containers:
+    - name: api
+      securityContext:
+        allowPrivilegeEscalation: false
+        readOnlyRootFilesystem: true
+        capabilities:
+          drop:
+            - ALL
+```
+
+## 10. Security Headers
+
+Spring Boot security headers configuration:
+
+```java
+@Configuration
+public class SecurityHeadersConfig implements WebMvcConfigurer {
+
+    @Override
+    public void addInterceptors(InterceptorRegistry registry) {
+        registry.addInterceptor(new HandlerInterceptor() {
+            @Override
+            public boolean preHandle(HttpServletRequest request,
+                                    HttpServletResponse response,
+                                    Object handler) {
+                response.setHeader("X-Content-Type-Options", "nosniff");
+                response.setHeader("X-Frame-Options", "DENY");
+                response.setHeader("X-XSS-Protection", "1; mode=block");
+                response.setHeader("Content-Security-Policy", "default-src 'self'");
+                response.setHeader("Strict-Transport-Security",
+                    "max-age=31536000; includeSubDomains");
+                response.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
+                return true;
+            }
+        });
     }
-
-    // Additional semantic validation
-    if err := validateJobConfig(req); err != nil {
-        c.JSON(422, gin.H{"error": err.Error()})
-        return
-    }
-
-    // Process request...
 }
 ```
 
-### 6.2 Block JSON Validation
+## 11. Compliance
 
-```go
-func validateBlockJSON(rule json.RawMessage) error {
-    // JSON Schema validation
-    schema := loadSchema("block-expression.json")
-    result, err := schema.Validate(gojsonschema.NewBytesLoader(rule))
-    if err != nil {
-        return err
-    }
-    if !result.Valid() {
-        return formatSchemaErrors(result.Errors())
-    }
+### 11.1 SOC 2 Compliance
 
-    // Additional semantic checks
-    return validateSemantics(rule)
-}
+| Control | Implementation |
+|---------|---------------|
+| Access Control | RBAC, OAuth 2.0, MFA |
+| Audit Logging | All data access logged, 7-year retention |
+| Encryption | At rest (AES-256), in transit (TLS 1.2+) |
+| Data Retention | Configurable policies, automated cleanup |
+| Incident Response | Documented procedures, security alerts |
 
-func validateSemantics(rule json.RawMessage) error {
-    var node BlockNode
-    json.Unmarshal(rule, &node)
+### 11.2 GDPR Compliance
 
-    // Check for circular references
-    if hasCircularReference(node) {
-        return errors.New("circular reference detected")
-    }
-
-    // Check nesting depth
-    if depth := maxDepth(node); depth > 10 {
-        return errors.New("expression too deeply nested")
-    }
-
-    // Check for dangerous patterns
-    if containsDangerousPattern(node) {
-        return errors.New("potentially dangerous pattern detected")
-    }
-
-    return nil
-}
+```yaml
+gdpr:
+  enabled: true
+  data_subject_access:
+    max_response_time: 30 days
+    export_format: json
+  right_to_deletion:
+    supported: true
+    retention_override: false  # Cannot delete audit logs
+  data_breach_notification:
+    max_notification_time: 72 hours
+    notify: dpo@company.com
 ```
 
-## 7. Security Headers
+## 12. Security Checklist
 
-```go
-func SecurityHeaders() gin.HandlerFunc {
-    return func(c *gin.Context) {
-        c.Header("X-Content-Type-Options", "nosniff")
-        c.Header("X-Frame-Options", "DENY")
-        c.Header("X-XSS-Protection", "1; mode=block")
-        c.Header("Content-Security-Policy", "default-src 'self'")
-        c.Header("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
-        c.Header("Referrer-Policy", "strict-origin-when-cross-origin")
-        c.Next()
-    }
-}
-```
+### Development
 
-## 8. Security Checklist
-
-### 8.1 Development
-
-- [ ] All dependencies scanned for vulnerabilities
-- [ ] Static code analysis (SAST) in CI/CD
+- [ ] Dependencies scanned for vulnerabilities (Snyk, Dependabot)
+- [ ] Static code analysis (SonarQube, SpotBugs)
 - [ ] Secrets never committed to repository
 - [ ] Input validation on all endpoints
 - [ ] Output encoding for XSS prevention
+- [ ] SQL injection prevention (parameterized queries)
 
-### 8.2 Deployment
+### Deployment
 
 - [ ] TLS 1.2+ for all connections
 - [ ] Network policies restricting pod communication
 - [ ] Resource limits on all containers
 - [ ] Read-only root filesystem where possible
 - [ ] Non-root container users
+- [ ] Secrets managed via external secret manager
 
-### 8.3 Operations
+### Operations
 
-- [ ] Audit logging enabled
-- [ ] Log aggregation configured
+- [ ] Audit logging enabled and monitored
+- [ ] Log aggregation configured (Loki, ELK)
 - [ ] Alerts for security events
-- [ ] Regular security scans
+- [ ] Regular security scans (Trivy, Falco)
 - [ ] Incident response plan documented
+- [ ] Regular backup verification

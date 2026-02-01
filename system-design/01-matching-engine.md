@@ -2,255 +2,421 @@
 
 ## 1. Overview
 
-The matching engine is the core component responsible for comparing records from two data sources and determining matches based on configured rules.
+The matching engine is the core component responsible for comparing records from two data sources and determining matches based on configured rules. Built on **Polars** (Python with Rust backend), it provides high-performance columnar processing with native Parquet and S3 support.
 
 ## 2. Engine Architecture
 
-```mermaid
-flowchart LR
-    subgraph Input
-        Config["Job Config<br/>(YAML)"]
-        SourceA["Data Source A"]
-        SourceB["Data Source B"]
-    end
-
-    subgraph Compiler["Rule Compiler"]
-        Parser["Block JSON<br/>Parser"]
-        Validator["Schema<br/>Validator"]
-        LuaGen["Lua Code<br/>Generator"]
-    end
-
-    subgraph Matcher["Matching Engine"]
-        Loader["Data Loader<br/>(JDBC, HTTP, SFTP)"]
-        HashJoin["Hash Join<br/>Algorithm"]
-        RuleEval["Rule Evaluator<br/>(Lua Runtime)"]
-    end
-
-    subgraph Output
-        Matched["Matched<br/>Records"]
-        UnmatchedL["Unmatched<br/>Left"]
-        UnmatchedR["Unmatched<br/>Right"]
-        Explanations["Match<br/>Explanations"]
-    end
-
-    Config --> Parser
-    Parser --> Validator
-    Validator --> LuaGen
-    LuaGen --> RuleEval
-
-    SourceA --> Loader
-    SourceB --> Loader
-    Loader --> HashJoin
-    HashJoin --> RuleEval
-
-    RuleEval --> Matched
-    RuleEval --> UnmatchedL
-    RuleEval --> UnmatchedR
-    RuleEval --> Explanations
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                        Polars K8s Job                                   │
+│                                                                         │
+│  ┌──────────────┐    ┌──────────────┐    ┌──────────────┐              │
+│  │  Job Config  │    │   Source A   │    │   Source B   │              │
+│  │   (YAML)     │    │  (Parquet)   │    │  (Parquet)   │              │
+│  └──────┬───────┘    └──────┬───────┘    └──────┬───────┘              │
+│         │                   │                   │                       │
+│         ▼                   ▼                   ▼                       │
+│  ┌─────────────────────────────────────────────────────────────────┐   │
+│  │                    Expression Compiler                           │   │
+│  │   Block JSON → Polars Expressions + Python Functions            │   │
+│  └─────────────────────────────────────────────────────────────────┘   │
+│                                    │                                    │
+│                                    ▼                                    │
+│  ┌─────────────────────────────────────────────────────────────────┐   │
+│  │                     Polars Matching Engine                       │   │
+│  │   ┌─────────────┐  ┌─────────────┐  ┌─────────────────────┐     │   │
+│  │   │ Data Loader │  │  Hash Join  │  │   Rule Evaluator    │     │   │
+│  │   │ (S3/Parquet)│  │ (pl.join)   │  │ (Polars Expressions)│     │   │
+│  │   └─────────────┘  └─────────────┘  └─────────────────────┘     │   │
+│  └─────────────────────────────────────────────────────────────────┘   │
+│                                    │                                    │
+│                                    ▼                                    │
+│  ┌─────────────────────────────────────────────────────────────────┐   │
+│  │                         Outputs (S3)                             │   │
+│  │   matched.parquet  │  unmatched_left.parquet  │  explanations   │   │
+│  └─────────────────────────────────────────────────────────────────┘   │
+└─────────────────────────────────────────────────────────────────────────┘
 ```
 
-## 3. Hash Join Algorithm (1:1 Matching)
+## 3. Technology Stack
 
-The Hash Join algorithm provides O(n + m) time complexity for matching, making it ideal for large datasets.
+| Component | Technology | Rationale |
+|-----------|------------|-----------|
+| **Language** | Python 3.11+ | Rich ecosystem, Numba JIT support |
+| **Core Engine** | Polars 0.20+ | Rust-powered, columnar, Parquet-native |
+| **JIT Compilation** | Numba | Fast custom functions |
+| **Storage** | S3 + Parquet | Columnar format, direct Polars access |
+| **Container** | Python slim image | K8s Job execution |
 
-```mermaid
-flowchart TD
-    subgraph Phase1["Phase 1: Build Index"]
-        A1["Read Source A"] --> A2["Extract Join Keys"]
-        A2 --> A3["Build HashMap<br/>key → row"]
-    end
+## 4. Hash Join Algorithm (1:1 Matching)
 
-    subgraph Phase2["Phase 2: Probe & Match"]
-        B1["Read Source B"] --> B2["Extract Join Keys"]
-        B2 --> B3{"Key exists<br/>in HashMap?"}
-        B3 -->|Yes| B4["Get Candidate Row"]
-        B4 --> B5["Evaluate Rules"]
-        B5 -->|Pass| B6["Emit MATCHED"]
-        B5 -->|Fail| B7["Emit MATCH_FAILED<br/>(with explanation)"]
-        B3 -->|No| B8["Emit UNMATCHED_RIGHT"]
-    end
+Polars provides highly optimized hash join operations implemented in Rust.
 
-    subgraph Phase3["Phase 3: Remainder"]
-        C1["Scan Unused<br/>HashMap Entries"]
-        C1 --> C2["Emit UNMATCHED_LEFT"]
-    end
+### 4.1 Join Implementation
 
-    Phase1 --> Phase2
-    Phase2 --> Phase3
+```python
+import polars as pl
+
+# Read source data from S3
+source_left = pl.scan_parquet("s3://bucket/sources/left/*.parquet")
+source_right = pl.scan_parquet("s3://bucket/sources/right/*.parquet")
+
+# Execute hash join on configured keys
+joined = source_left.join(
+    source_right,
+    left_on=["transaction_id"],
+    right_on=["txn_id"],
+    how="full",  # Returns matched + unmatched from both sides
+    suffix="_right"
+)
+
+# Lazy evaluation - only executes when needed
+result = joined.collect()
 ```
 
-### 3.1 Phase Details
+### 4.2 Join Phases
 
-#### Phase 1: Build Index
-1. Stream records from Source A (typically the smaller dataset)
-2. Extract join key fields (e.g., `transaction_id`, `reference_number`)
-3. Build in-memory hash map: `key → record`
-4. Mark all entries as "unused"
+```
+Phase 1: Data Loading (Lazy)
+┌─────────────────────────────────────────────────────────────┐
+│  pl.scan_parquet("s3://...")  →  LazyFrame (no data loaded) │
+└─────────────────────────────────────────────────────────────┘
 
-#### Phase 2: Probe & Match
-1. Stream records from Source B
-2. Extract join key fields
-3. Probe the hash map:
-   - **Key Found**: Get candidate record, evaluate matching rules
-     - Rules pass → Emit MATCHED, mark entry as "used"
-     - Rules fail → Emit MATCH_FAILED with explanation
-   - **Key Not Found**: Emit UNMATCHED_RIGHT
+Phase 2: Join Planning (Lazy)
+┌─────────────────────────────────────────────────────────────┐
+│  left.join(right, on=keys)  →  LazyFrame (query plan built) │
+└─────────────────────────────────────────────────────────────┘
 
-#### Phase 3: Remainder
-1. Scan hash map for entries still marked "unused"
-2. Emit UNMATCHED_LEFT for each
+Phase 3: Rule Evaluation (Lazy)
+┌─────────────────────────────────────────────────────────────┐
+│  joined.with_columns(rules)  →  LazyFrame (rules added)     │
+└─────────────────────────────────────────────────────────────┘
 
-### 3.2 Complexity Analysis
+Phase 4: Execution (Eager)
+┌─────────────────────────────────────────────────────────────┐
+│  result.collect()  →  DataFrame (all operations execute)    │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### 4.3 Complexity Analysis
 
 | Operation | Time Complexity | Space Complexity |
 |-----------|-----------------|------------------|
-| Build Index | O(n) | O(n) |
-| Probe & Match | O(m) | O(1) per record |
-| Remainder | O(n) | O(1) |
-| **Total** | **O(n + m)** | **O(n)** |
+| Data Loading | O(n + m) | Streaming (memory-efficient) |
+| Hash Join | O(n + m) | O(min(n, m)) |
+| Rule Evaluation | O(n * r) | O(1) per rule |
+| **Total** | **O(n + m)** | **O(min(n, m))** |
 
-Where n = Source A records, m = Source B records.
+Where n = Source A records, m = Source B records, r = number of rules.
 
-## 4. Matching Modes
+## 5. Matching Modes
 
-```mermaid
-flowchart LR
-    subgraph OneToOne["1:1 Matching"]
-        A1["Record A"] --- B1["Record B"]
-    end
-
-    subgraph OneToMany["1:N Matching"]
-        A2["Parent Record"]
-        A2 --- B2a["Child 1"]
-        A2 --- B2b["Child 2"]
-        A2 --- B2c["Child N"]
-    end
-
-    subgraph ManyToMany["N:M Matching"]
-        A3a["Record A1"] --- B3a["Record B1"]
-        A3a --- B3b["Record B2"]
-        A3b["Record A2"] --- B3a
-        A3b --- B3b
-    end
-```
-
-### 4.1 One-to-One (1:1)
+### 5.1 One-to-One (1:1)
 - **MVP Implementation**
 - Each record from Source A matches at most one record from Source B
-- First match wins (deterministic)
-- Use case: Transaction matching where IDs are unique
+- Polars `how="inner"` for matched, `how="full"` for complete picture
 
-### 4.2 One-to-Many (1:N)
+```python
+# 1:1 matching with deduplication
+matched = source_left.join(
+    source_right,
+    left_on=join_keys,
+    right_on=join_keys,
+    how="inner"
+)
+```
+
+### 5.2 One-to-Many (1:N)
 - **Future Implementation**
 - One parent record matches multiple child records
-- Aggregation rules: sum of children must equal parent amount
-- Use case: Invoice vs line items, batch transactions
+- Use `group_by` + aggregation for sum validation
 
-### 4.3 Many-to-Many (N:M)
+```python
+# 1:N with aggregation
+children_sum = source_right.group_by("parent_id").agg(
+    pl.col("amount").sum().alias("total_amount")
+)
+matched = source_left.join(children_sum, left_on="id", right_on="parent_id")
+```
+
+### 5.3 Many-to-Many (N:M)
 - **Future Implementation**
-- Multiple records from both sources can match
 - Complex reconciliation scenarios
-- Use case: Split transactions, partial settlements
+- Requires allocation algorithms
 
-## 5. Join Key Strategy
+## 6. Join Key Strategy
 
-### 5.1 Simple Key
-Single field as join key:
-```yaml
-joinConditions:
-  - leftField: transaction_id
-    rightField: txn_id
+### 6.1 Simple Key
+```python
+joined = source_left.join(
+    source_right,
+    left_on=["transaction_id"],
+    right_on=["txn_id"],
+    how="full"
+)
 ```
 
-### 5.2 Composite Key
-Multiple fields combined:
-```yaml
-joinConditions:
-  - leftField: account_number
-    rightField: acct_num
-  - leftField: transaction_date
-    rightField: txn_date
+### 6.2 Composite Key
+```python
+joined = source_left.join(
+    source_right,
+    left_on=["account_number", "transaction_date"],
+    right_on=["acct_num", "txn_date"],
+    how="full"
+)
 ```
 
-### 5.3 Fuzzy Key (Future)
-Approximate matching with tolerance:
-```yaml
-joinConditions:
-  - leftField: amount
-    rightField: amount
-    tolerance: 0.01
-    toleranceType: absolute  # or percentage
+### 6.3 Transformed Key
+```python
+# Apply transformations before join
+source_left = source_left.with_columns(
+    pl.col("reference").str.to_uppercase().str.strip_chars().alias("join_key")
+)
+source_right = source_right.with_columns(
+    pl.col("ref_number").str.to_uppercase().str.strip_chars().alias("join_key")
+)
+joined = source_left.join(source_right, on="join_key", how="full")
 ```
 
-## 6. Data Loading
+## 7. Rule Evaluation with Polars Expressions
 
-### 6.1 Supported Data Sources
+### 7.1 Composable Expression Translation
 
-| Type | Protocol | Configuration |
-|------|----------|---------------|
-| **PostgreSQL** | JDBC | Connection string, query |
-| **REST API** | HTTP/HTTPS | URL, headers, pagination |
-| **SFTP** | SSH | Host, credentials, path |
-| **CSV** | File | Path, delimiter, encoding |
-| **S3** | HTTP/HTTPS | Bucket, key, credentials |
+Block JSON expressions are translated to Polars expressions:
 
-### 6.2 Streaming vs Batch
+```python
+# Block JSON:
+# { type: "comparison", operator: "<=",
+#   left: { type: "function", name: "ABS", arguments: [
+#     { type: "arithmetic", operator: "-",
+#       left: { field: "source_left.amount" },
+#       right: { field: "source_right.amount" }
+#     }
+#   ]},
+#   right: { type: "literal", value: 0.01 }
+# }
 
-```mermaid
-flowchart LR
-    subgraph Streaming["Streaming Mode"]
-        S1["Read chunk"] --> S2["Process chunk"]
-        S2 --> S3["Write results"]
-        S3 --> S1
-    end
-
-    subgraph Batch["Batch Mode"]
-        B1["Load all data"] --> B2["Process all"]
-        B2 --> B3["Write all results"]
-    end
+# Translated to Polars:
+rule_expr = (
+    (pl.col("amount") - pl.col("amount_right")).abs() <= 0.01
+).alias("amount_tolerance_passed")
 ```
 
-- **Streaming**: For large datasets, memory-efficient
-- **Batch**: For smaller datasets, simpler implementation
+### 7.2 Rule Evaluation Pipeline
 
-## 7. Performance Optimizations
+```python
+def evaluate_rules(joined: pl.LazyFrame, rules: list) -> pl.LazyFrame:
+    """Evaluate all rules and add result columns."""
 
-### 7.1 Parallelization
-- Partition Source B by key hash
-- Process partitions in parallel
-- Merge results
+    rule_expressions = []
+    for rule in rules:
+        expr = compile_rule_to_polars(rule)
+        rule_expressions.append(expr.alias(f"{rule['name']}_passed"))
 
-### 7.2 Memory Management
-- Spill to disk for large hash maps
-- LRU cache for frequently accessed records
-- Configurable memory limits
+    # Add rule evaluation columns
+    result = joined.with_columns(rule_expressions)
 
-### 7.3 Compiled Rules
-- Pre-compile Lua rules to bytecode
-- Cache compiled rules by hash
-- Reuse across executions
+    # Determine overall match status
+    error_rules = [r['name'] for r in rules if r['severity'] == 'error']
+    result = result.with_columns(
+        pl.all_horizontal([pl.col(f"{r}_passed") for r in error_rules])
+          .alias("is_matched")
+    )
 
-## 8. Output Formats
+    return result
+```
 
-### 8.1 Match Results
+### 7.3 Complex Rules with Numba
 
-| Category | Description |
-|----------|-------------|
-| **matched** | Records that passed all matching rules |
-| **unmatched_left** | Records from Source A with no match |
-| **unmatched_right** | Records from Source B with no match |
-| **match_failed** | Records found by key but failed rules |
+For rules that cannot be expressed as Polars expressions:
 
-### 8.2 Output Schema
+```python
+import numba
 
-```json
-{
-  "result": "matched",
-  "leftRecord": { "id": "TXN-001", "amount": 100.50 },
-  "rightRecord": { "id": "TXN-001", "amount": 100.48 },
-  "explanation": {
-    "summary": "Matched with 1 warning",
-    "rules": [...]
-  }
+@numba.jit(nopython=True)
+def validate_tiered_fee(amount: float, fee: float) -> bool:
+    if amount <= 100:
+        expected = 2.50
+    elif amount <= 1000:
+        expected = 5.00
+    else:
+        expected = amount * 0.005
+    return abs(expected - fee) <= 0.10
+
+# Apply via map_elements
+result = joined.with_columns(
+    pl.struct(["amount", "fee_amount"])
+      .map_elements(lambda x: validate_tiered_fee(x["amount"], x["fee_amount"]))
+      .alias("fee_validation_passed")
+)
+```
+
+## 8. Data Loading from S3
+
+### 8.1 Direct S3 Access
+
+```python
+import polars as pl
+
+# Configure S3 credentials via environment
+# AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_REGION
+
+# Lazy scan - no data loaded until collect()
+source_left = pl.scan_parquet(
+    "s3://bucket/sources/source_a/date=2024-03-15/*.parquet",
+    storage_options={
+        "aws_access_key_id": os.environ["AWS_ACCESS_KEY_ID"],
+        "aws_secret_access_key": os.environ["AWS_SECRET_ACCESS_KEY"],
+        "aws_region": os.environ["AWS_REGION"]
+    }
+)
+```
+
+### 8.2 Partitioned Data
+
+Airbyte outputs data in partitioned format:
+
+```
+s3://bucket/sources/
+  └── payment_gateway/
+      └── date=2024-03-15/
+          ├── part-0001.parquet
+          ├── part-0002.parquet
+          └── part-0003.parquet
+```
+
+```python
+# Read all partitions with predicate pushdown
+source = pl.scan_parquet(
+    "s3://bucket/sources/payment_gateway/date=2024-03-15/*.parquet"
+).filter(
+    pl.col("status") == "COMPLETED"  # Pushed down to Parquet reader
+)
+```
+
+## 9. Output Generation
+
+### 9.1 Result Categories
+
+```python
+def categorize_results(evaluated: pl.DataFrame) -> dict:
+    """Split results into categories."""
+
+    # Records that matched (joined and passed rules)
+    matched = evaluated.filter(
+        pl.col("is_matched") &
+        pl.col("left_id").is_not_null() &
+        pl.col("right_id").is_not_null()
+    )
+
+    # Left records with no join match
+    unmatched_left = evaluated.filter(
+        pl.col("right_id").is_null()
+    )
+
+    # Right records with no join match
+    unmatched_right = evaluated.filter(
+        pl.col("left_id").is_null()
+    )
+
+    # Joined but rules failed
+    match_failed = evaluated.filter(
+        pl.col("left_id").is_not_null() &
+        pl.col("right_id").is_not_null() &
+        ~pl.col("is_matched")
+    )
+
+    return {
+        "matched": matched,
+        "unmatched_left": unmatched_left,
+        "unmatched_right": unmatched_right,
+        "match_failed": match_failed
+    }
+```
+
+### 9.2 Write Results to S3
+
+```python
+def write_results(results: dict, job_id: str):
+    """Write all result categories to S3 as Parquet."""
+
+    base_path = f"s3://bucket/results/{job_id}"
+
+    for category, df in results.items():
+        df.write_parquet(
+            f"{base_path}/{category}.parquet",
+            compression="zstd"
+        )
+```
+
+### 9.3 Output Schema
+
+```python
+output_schema = {
+    "match_id": pl.Utf8,
+    "left_*": "All columns from Source A",
+    "right_*": "All columns from Source B (with _right suffix)",
+    "is_matched": pl.Boolean,
+    "rules_passed": pl.List(pl.Utf8),
+    "rules_failed": pl.List(pl.Utf8),
+    "match_explanation": pl.Utf8,
+    "matched_at": pl.Datetime
 }
+```
+
+## 10. Performance Optimizations
+
+### 10.1 Lazy Evaluation
+- Query plan optimization before execution
+- Predicate pushdown to Parquet reader
+- Column pruning (only read needed columns)
+
+### 10.2 Parallel Execution
+- Polars automatically parallelizes operations
+- Configurable thread pool size
+- Partition-parallel S3 reads
+
+### 10.3 Memory Management
+- Streaming execution for large datasets
+- Configurable row group size
+- Spill to disk when needed
+
+```python
+# Configure Polars for large datasets
+pl.Config.set_streaming_chunk_size(100_000)
+
+# Use streaming for very large joins
+result = joined.collect(streaming=True)
+```
+
+### 10.4 Resource Limits (K8s Job)
+
+```yaml
+resources:
+  requests:
+    memory: "2Gi"
+    cpu: "1000m"
+  limits:
+    memory: "8Gi"
+    cpu: "4000m"
+```
+
+## 11. Deduplication Handling
+
+When JOIN produces multiple matches, use ordering to select the best match:
+
+```python
+def deduplicate_matches(joined: pl.LazyFrame, config: dict) -> pl.LazyFrame:
+    """Select best match when multiple candidates exist."""
+
+    # Order by configured fields
+    order_cols = config.get("deduplication_order", {})
+
+    if order_cols.get("left"):
+        # Rank matches for each left record
+        joined = joined.with_columns(
+            pl.col("updated_at").rank(descending=True).over("left_id").alias("rank")
+        ).filter(pl.col("rank") == 1)
+
+    return joined
 ```

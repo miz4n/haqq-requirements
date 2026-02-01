@@ -3,51 +3,64 @@
 ## 1. Overview
 
 The reconciliation engine is designed for cloud-native deployment on Kubernetes with:
-- Horizontal scaling for workers
-- High availability for API services
-- Managed data services
+- **Spring Boot API** for configuration and orchestration
+- **Polars K8s Jobs** for reconciliation execution
+- **Airbyte OSS** for data ingestion
+- **S3** for Parquet storage (source data and results)
+- **PostgreSQL** for configuration and audit logs
 
 ## 2. Kubernetes Architecture
 
-```mermaid
-flowchart TB
-    subgraph K8s["Kubernetes Cluster"]
-        subgraph Ingress
-            IG["Ingress Controller<br/>(nginx)"]
-        end
-
-        subgraph Frontend
-            Web["Dashboard Pods<br/>Replicas: 2"]
-        end
-
-        subgraph Backend
-            API["API Pods<br/>Replicas: 3"]
-        end
-
-        subgraph Workers
-            W1["Worker Pod 1<br/>Go + Lua"]
-            W2["Worker Pod 2<br/>Go + Lua"]
-            W3["Worker Pod 3<br/>Go + Lua"]
-            WN["... Pod N<br/>(HPA: 3-10)"]
-        end
-
-        subgraph Data
-            PG[(PostgreSQL<br/>StatefulSet)]
-            RD[(Redis<br/>Cluster)]
-            S3[(MinIO<br/>S3-Compatible)]
-        end
-    end
-
-    Internet --> IG
-    IG --> Web
-    IG --> API
-    API --> Workers
-    Workers --> Data
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                           Kubernetes Cluster                                │
+│                                                                             │
+│  ┌───────────────────────────────────────────────────────────────────────┐ │
+│  │                         Ingress Controller                             │ │
+│  │                            (nginx)                                     │ │
+│  └───────────────────────────────┬───────────────────────────────────────┘ │
+│                                  │                                          │
+│          ┌───────────────────────┼───────────────────────┐                 │
+│          │                       │                       │                 │
+│          ▼                       ▼                       ▼                 │
+│  ┌───────────────┐      ┌───────────────┐      ┌───────────────┐          │
+│  │   Dashboard   │      │  Spring Boot  │      │    Airbyte    │          │
+│  │   (React)     │      │     API       │      │   (Web + API) │          │
+│  │   Replicas: 2 │      │   Replicas: 3 │      │   Replicas: 1 │          │
+│  └───────────────┘      └───────┬───────┘      └───────┬───────┘          │
+│                                 │                       │                  │
+│                    ┌────────────┼───────────────────────┘                  │
+│                    │            │                                          │
+│                    ▼            ▼                                          │
+│  ┌────────────────────────────────────────────────────────────────────┐   │
+│  │                        K8s API Server                               │   │
+│  │                    (Job Management)                                 │   │
+│  └────────────────────────────┬───────────────────────────────────────┘   │
+│                               │                                            │
+│                               ▼                                            │
+│  ┌────────────────────────────────────────────────────────────────────┐   │
+│  │                     Polars K8s Jobs                                 │   │
+│  │   ┌────────────┐  ┌────────────┐  ┌────────────┐  ┌────────────┐   │   │
+│  │   │  Job: S1   │  │  Job: S2   │  │  Job: S3   │  │  Job: S4   │   │   │
+│  │   │ (Polars)   │  │ (Polars)   │  │ (Polars)   │  │ (Polars)   │   │   │
+│  │   └────────────┘  └────────────┘  └────────────┘  └────────────┘   │   │
+│  └────────────────────────────────────────────────────────────────────┘   │
+│                               │                                            │
+│                               ▼                                            │
+│  ┌────────────────────────────────────────────────────────────────────┐   │
+│  │                         Data Layer                                  │   │
+│  │   ┌─────────────────┐            ┌─────────────────────────────┐   │   │
+│  │   │   PostgreSQL    │            │        S3 / MinIO           │   │   │
+│  │   │  (Config/Audit) │            │  /sources/  (from Airbyte)  │   │   │
+│  │   │   StatefulSet   │            │  /results/  (from Polars)   │   │   │
+│  │   └─────────────────┘            └─────────────────────────────┘   │   │
+│  └────────────────────────────────────────────────────────────────────┘   │
+└─────────────────────────────────────────────────────────────────────────────┘
 ```
 
 ## 3. Component Specifications
 
-### 3.1 API Service
+### 3.1 Spring Boot API Service
 
 ```yaml
 apiVersion: apps/v1
@@ -66,97 +79,187 @@ spec:
       labels:
         app: recon-api
     spec:
+      serviceAccountName: recon-api-sa
       containers:
         - name: api
-          image: recon-engine/api:latest
+          image: reconciliation/spring-boot-api:latest
           ports:
             - containerPort: 8080
           env:
-            - name: DATABASE_URL
+            - name: SPRING_DATASOURCE_URL
               valueFrom:
                 secretKeyRef:
                   name: recon-secrets
                   key: database-url
-            - name: REDIS_URL
+            - name: SPRING_DATASOURCE_USERNAME
               valueFrom:
                 secretKeyRef:
                   name: recon-secrets
-                  key: redis-url
+                  key: database-username
+            - name: SPRING_DATASOURCE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: recon-secrets
+                  key: database-password
+            - name: AWS_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: s3-credentials
+                  key: access-key
+            - name: AWS_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: s3-credentials
+                  key: secret-key
+            - name: AWS_REGION
+              value: "us-east-1"
+            - name: S3_BUCKET
+              value: "recon-data"
+            - name: AIRBYTE_API_URL
+              value: "http://airbyte-server:8001"
           resources:
             requests:
-              memory: "256Mi"
-              cpu: "250m"
-            limits:
               memory: "512Mi"
               cpu: "500m"
+            limits:
+              memory: "1Gi"
+              cpu: "1000m"
           livenessProbe:
             httpGet:
-              path: /health
+              path: /actuator/health/liveness
               port: 8080
-            initialDelaySeconds: 10
+            initialDelaySeconds: 30
             periodSeconds: 10
           readinessProbe:
             httpGet:
-              path: /ready
+              path: /actuator/health/readiness
               port: 8080
-            initialDelaySeconds: 5
+            initialDelaySeconds: 10
             periodSeconds: 5
+---
+# ServiceAccount for K8s API access
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: recon-api-sa
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: recon-job-manager
+rules:
+  - apiGroups: ["batch"]
+    resources: ["jobs"]
+    verbs: ["create", "get", "list", "watch", "delete"]
+  - apiGroups: [""]
+    resources: ["pods", "pods/log"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: recon-api-job-manager
+subjects:
+  - kind: ServiceAccount
+    name: recon-api-sa
+roleRef:
+  kind: Role
+  name: recon-job-manager
+  apiGroup: rbac.authorization.k8s.io
 ```
 
-### 3.2 Worker Service
+### 3.2 Polars Job Template
+
+Jobs are created dynamically by Spring Boot for each reconciliation stage.
 
 ```yaml
-apiVersion: apps/v1
-kind: Deployment
+apiVersion: batch/v1
+kind: Job
 metadata:
-  name: recon-worker
+  name: recon-{workflow_id}-{stage_id}
   labels:
-    app: recon-worker
+    app: recon-engine
+    component: polars-job
+    workflow: "{workflow_id}"
+    stage: "{stage_id}"
 spec:
-  replicas: 3
-  selector:
-    matchLabels:
-      app: recon-worker
+  backoffLimit: 3
+  activeDeadlineSeconds: 3600
+  ttlSecondsAfterFinished: 86400
   template:
     metadata:
       labels:
-        app: recon-worker
+        app: recon-engine
+        component: polars-job
     spec:
+      restartPolicy: Never
       containers:
-        - name: worker
-          image: recon-engine/worker:latest
+        - name: polars-engine
+          image: reconciliation/polars-engine:latest
           env:
-            - name: DATABASE_URL
+            - name: WORKFLOW_ID
+              value: "{workflow_id}"
+            - name: STAGE_ID
+              value: "{stage_id}"
+            - name: CONFIG_URL
+              value: "s3://recon-data/configs/{workflow_id}/{stage_id}.yaml"
+            - name: AWS_ACCESS_KEY_ID
               valueFrom:
                 secretKeyRef:
-                  name: recon-secrets
-                  key: database-url
-            - name: REDIS_URL
+                  name: s3-credentials
+                  key: access-key
+            - name: AWS_SECRET_ACCESS_KEY
               valueFrom:
                 secretKeyRef:
-                  name: recon-secrets
-                  key: redis-url
-            - name: S3_ENDPOINT
-              value: "minio:9000"
-            - name: S3_BUCKET
-              value: "recon-results"
+                  name: s3-credentials
+                  key: secret-key
+            - name: AWS_REGION
+              value: "us-east-1"
+            - name: RESULT_CALLBACK_URL
+              value: "http://recon-api:8080/api/internal/jobs/{workflow_id}/{stage_id}/complete"
           resources:
             requests:
-              memory: "1Gi"
-              cpu: "500m"
+              memory: "2Gi"
+              cpu: "1000m"
             limits:
-              memory: "4Gi"
-              cpu: "2000m"
+              memory: "8Gi"
+              cpu: "4000m"
           volumeMounts:
             - name: scratch
-              mountPath: /tmp/recon
+              mountPath: /tmp/polars
       volumes:
         - name: scratch
           emptyDir:
-            sizeLimit: 10Gi
+            sizeLimit: 20Gi
 ```
 
-### 3.3 Web Dashboard
+### 3.3 Polars Engine Dockerfile
+
+```dockerfile
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# Install dependencies
+RUN pip install --no-cache-dir \
+    polars==0.20.0 \
+    pyarrow==14.0.0 \
+    boto3==1.34.0 \
+    pyyaml==6.0.1 \
+    numba==0.59.0
+
+# Copy application code
+COPY src/ /app/src/
+COPY main.py /app/
+
+# Set environment
+ENV PYTHONUNBUFFERED=1
+ENV POLARS_MAX_THREADS=4
+
+ENTRYPOINT ["python", "main.py"]
+```
+
+### 3.4 Web Dashboard
 
 ```yaml
 apiVersion: apps/v1
@@ -177,9 +280,12 @@ spec:
     spec:
       containers:
         - name: dashboard
-          image: recon-engine/dashboard:latest
+          image: reconciliation/dashboard:latest
           ports:
             - containerPort: 80
+          env:
+            - name: API_URL
+              value: "/api"
           resources:
             requests:
               memory: "64Mi"
@@ -189,111 +295,54 @@ spec:
               cpu: "100m"
 ```
 
-## 4. Horizontal Pod Autoscaler
+### 3.5 Airbyte Deployment
 
-```mermaid
-flowchart LR
-    subgraph Metrics
-        QueueDepth["Job Queue<br/>Depth"]
-        CPUUsage["CPU<br/>Usage"]
-        RequestRate["Request<br/>Rate"]
-    end
-
-    subgraph HPA["Horizontal Pod Autoscaler"]
-        WorkerHPA["Worker HPA<br/>Min: 3, Max: 10"]
-        APIHPA["API HPA<br/>Min: 2, Max: 5"]
-    end
-
-    subgraph Pods
-        WorkerPods["Worker Pods"]
-        APIPods["API Pods"]
-    end
-
-    QueueDepth -->|"Scale workers"| WorkerHPA
-    CPUUsage --> WorkerHPA
-    RequestRate --> APIHPA
-    WorkerHPA --> WorkerPods
-    APIHPA --> APIPods
-```
-
-### 4.1 Worker HPA
+Use the official Airbyte Helm chart or Docker Compose in K8s:
 
 ```yaml
-apiVersion: autoscaling/v2
-kind: HorizontalPodAutoscaler
+# Reference: https://docs.airbyte.com/deploying-airbyte/on-kubernetes
+apiVersion: apps/v1
+kind: Deployment
 metadata:
-  name: recon-worker-hpa
+  name: airbyte-server
+  labels:
+    app: airbyte
 spec:
-  scaleTargetRef:
-    apiVersion: apps/v1
-    kind: Deployment
-    name: recon-worker
-  minReplicas: 3
-  maxReplicas: 10
-  metrics:
-    - type: External
-      external:
-        metric:
-          name: redis_queue_depth
-          selector:
-            matchLabels:
-              queue: recon-jobs
-        target:
-          type: AverageValue
-          averageValue: "5"
-    - type: Resource
-      resource:
-        name: cpu
-        target:
-          type: Utilization
-          averageUtilization: 70
-    - type: Resource
-      resource:
-        name: memory
-        target:
-          type: Utilization
-          averageUtilization: 80
-  behavior:
-    scaleUp:
-      stabilizationWindowSeconds: 60
-      policies:
-        - type: Pods
-          value: 2
-          periodSeconds: 60
-    scaleDown:
-      stabilizationWindowSeconds: 300
-      policies:
-        - type: Pods
-          value: 1
-          periodSeconds: 120
+  replicas: 1
+  selector:
+    matchLabels:
+      app: airbyte-server
+  template:
+    metadata:
+      labels:
+        app: airbyte-server
+    spec:
+      containers:
+        - name: airbyte-server
+          image: airbyte/server:latest
+          ports:
+            - containerPort: 8001
+          env:
+            - name: DATABASE_URL
+              value: "jdbc:postgresql://postgres:5432/airbyte"
+            - name: CONFIGS_DATABASE_URL
+              value: "jdbc:postgresql://postgres:5432/airbyte"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: airbyte-server
+spec:
+  selector:
+    app: airbyte-server
+  ports:
+    - port: 8001
+      targetPort: 8001
 ```
 
-### 4.2 API HPA
+## 4. Services
 
-```yaml
-apiVersion: autoscaling/v2
-kind: HorizontalPodAutoscaler
-metadata:
-  name: recon-api-hpa
-spec:
-  scaleTargetRef:
-    apiVersion: apps/v1
-    kind: Deployment
-    name: recon-api
-  minReplicas: 2
-  maxReplicas: 5
-  metrics:
-    - type: Resource
-      resource:
-        name: cpu
-        target:
-          type: Utilization
-          averageUtilization: 70
-```
-
-## 5. Services
-
-### 5.1 API Service
+### 4.1 API Service
 
 ```yaml
 apiVersion: v1
@@ -304,12 +353,12 @@ spec:
   selector:
     app: recon-api
   ports:
-    - port: 80
+    - port: 8080
       targetPort: 8080
   type: ClusterIP
 ```
 
-### 5.2 Ingress
+### 4.2 Ingress
 
 ```yaml
 apiVersion: networking.k8s.io/v1
@@ -335,7 +384,7 @@ spec:
               service:
                 name: recon-api
                 port:
-                  number: 80
+                  number: 8080
           - path: /
             pathType: Prefix
             backend:
@@ -345,11 +394,11 @@ spec:
                   number: 80
 ```
 
-## 6. Data Services
+## 5. Data Services
 
-### 6.1 PostgreSQL
+### 5.1 PostgreSQL
 
-Option 1: Managed Service (Recommended)
+Option 1: Managed Service (Recommended for production)
 - AWS RDS PostgreSQL
 - Google Cloud SQL
 - Azure Database for PostgreSQL
@@ -409,41 +458,24 @@ spec:
         resources:
           requests:
             storage: 100Gi
-```
-
-### 6.2 Redis
-
-```yaml
-apiVersion: apps/v1
-kind: StatefulSet
+---
+apiVersion: v1
+kind: Service
 metadata:
-  name: redis
+  name: postgres
 spec:
-  serviceName: redis
-  replicas: 1
   selector:
-    matchLabels:
-      app: redis
-  template:
-    metadata:
-      labels:
-        app: redis
-    spec:
-      containers:
-        - name: redis
-          image: redis:7-alpine
-          ports:
-            - containerPort: 6379
-          resources:
-            requests:
-              memory: "256Mi"
-              cpu: "100m"
-            limits:
-              memory: "1Gi"
-              cpu: "500m"
+    app: postgres
+  ports:
+    - port: 5432
+      targetPort: 5432
 ```
 
-### 6.3 MinIO (S3-Compatible Storage)
+### 5.2 S3 Storage (MinIO for self-hosted)
+
+Option 1: AWS S3 (Recommended for production)
+
+Option 2: MinIO (S3-Compatible)
 
 ```yaml
 apiVersion: apps/v1
@@ -472,12 +504,12 @@ spec:
             - name: MINIO_ROOT_USER
               valueFrom:
                 secretKeyRef:
-                  name: minio-secrets
+                  name: s3-credentials
                   key: access-key
             - name: MINIO_ROOT_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: minio-secrets
+                  name: s3-credentials
                   key: secret-key
           volumeMounts:
             - name: data
@@ -498,6 +530,47 @@ spec:
         resources:
           requests:
             storage: 500Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: minio
+spec:
+  selector:
+    app: minio
+  ports:
+    - name: api
+      port: 9000
+      targetPort: 9000
+    - name: console
+      port: 9001
+      targetPort: 9001
+```
+
+## 6. S3 Bucket Structure
+
+```
+s3://recon-data/
+├── sources/                        # Airbyte output (Parquet)
+│   ├── {source_id}/
+│   │   └── date=YYYY-MM-DD/
+│   │       ├── part-0001.parquet
+│   │       ├── part-0002.parquet
+│   │       └── ...
+│   └── ...
+├── results/                        # Polars output (Parquet)
+│   ├── {workflow_id}/
+│   │   ├── {stage_id}/
+│   │   │   ├── matched.parquet
+│   │   │   ├── unmatched_left.parquet
+│   │   │   ├── unmatched_right.parquet
+│   │   │   ├── match_failed.parquet
+│   │   │   └── _metrics.json
+│   │   └── ...
+│   └── ...
+└── configs/                        # Job configurations
+    └── {workflow_id}/
+        └── {stage_id}.yaml
 ```
 
 ## 7. Configuration Management
@@ -510,10 +583,20 @@ kind: ConfigMap
 metadata:
   name: recon-config
 data:
-  LOG_LEVEL: "info"
-  LOG_FORMAT: "json"
-  WORKER_CONCURRENCY: "4"
-  MAX_MEMORY_MB: "3072"
+  # Spring Boot
+  SPRING_PROFILES_ACTIVE: "production"
+  SERVER_PORT: "8080"
+
+  # Polars Jobs
+  POLARS_MAX_THREADS: "4"
+  POLARS_STREAMING_CHUNK_SIZE: "100000"
+
+  # Job defaults
+  JOB_TIMEOUT_SECONDS: "3600"
+  JOB_BACKOFF_LIMIT: "3"
+  JOB_TTL_AFTER_FINISHED: "86400"
+
+  # Retention
   RESULT_RETENTION_DAYS: "90"
 ```
 
@@ -526,10 +609,18 @@ metadata:
   name: recon-secrets
 type: Opaque
 stringData:
-  database-url: "postgres://user:pass@postgres:5432/recon?sslmode=disable"
-  redis-url: "redis://redis:6379"
-  s3-access-key: "minioadmin"
-  s3-secret-key: "minioadmin"
+  database-url: "jdbc:postgresql://postgres:5432/recon"
+  database-username: "recon"
+  database-password: "secretpassword"
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: s3-credentials
+type: Opaque
+stringData:
+  access-key: "minioadmin"
+  secret-key: "minioadmin"
 ```
 
 ## 8. Monitoring Stack
@@ -547,19 +638,22 @@ spec:
       app: recon-api
   endpoints:
     - port: http
-      path: /metrics
+      path: /actuator/prometheus
       interval: 15s
 ```
 
-### 8.2 Grafana Dashboard
+### 8.2 Key Metrics
 
-Key metrics to display:
-- Request rate and latency
-- Job queue depth
-- Active workers
-- Match rates
-- Error rates
-- Memory/CPU usage
+| Metric | Source | Description |
+|--------|--------|-------------|
+| `recon_jobs_active` | Spring Boot | Currently running K8s jobs |
+| `recon_jobs_completed_total` | Spring Boot | Completed jobs counter |
+| `recon_jobs_failed_total` | Spring Boot | Failed jobs counter |
+| `recon_stage_duration_seconds` | Polars Job | Stage execution time |
+| `recon_records_processed_total` | Polars Job | Records processed |
+| `recon_match_rate` | Polars Job | Match percentage |
+| `airbyte_sync_duration_seconds` | Airbyte | Data sync duration |
+| `s3_bytes_written` | Polars Job | Data written to S3 |
 
 ### 8.3 Alerting Rules
 
@@ -572,29 +666,37 @@ spec:
   groups:
     - name: recon-engine
       rules:
-        - alert: HighJobQueueDepth
-          expr: redis_queue_depth{queue="recon-jobs"} > 100
-          for: 5m
+        - alert: ReconJobFailed
+          expr: increase(recon_jobs_failed_total[5m]) > 0
+          for: 1m
           labels:
             severity: warning
           annotations:
-            summary: "Job queue backing up"
+            summary: "Reconciliation job failed"
 
-        - alert: WorkerDown
-          expr: up{job="recon-worker"} == 0
+        - alert: ReconAPIDown
+          expr: up{job="recon-api"} == 0
           for: 1m
           labels:
             severity: critical
           annotations:
-            summary: "Recon worker is down"
+            summary: "Reconciliation API is down"
 
-        - alert: HighErrorRate
-          expr: rate(recon_job_errors_total[5m]) > 0.1
+        - alert: AirbyteSyncFailed
+          expr: airbyte_sync_status == 0
           for: 5m
           labels:
             severity: warning
           annotations:
-            summary: "High job error rate"
+            summary: "Airbyte sync failed"
+
+        - alert: S3StorageHigh
+          expr: s3_bucket_size_bytes > 500e9
+          for: 1h
+          labels:
+            severity: warning
+          annotations:
+            summary: "S3 storage exceeding 500GB"
 ```
 
 ## 9. Helm Chart Structure
@@ -607,9 +709,9 @@ helm/recon-engine/
 │   ├── _helpers.tpl
 │   ├── api-deployment.yaml
 │   ├── api-service.yaml
-│   ├── api-hpa.yaml
-│   ├── worker-deployment.yaml
-│   ├── worker-hpa.yaml
+│   ├── api-serviceaccount.yaml
+│   ├── api-rbac.yaml
+│   ├── polars-job-template.yaml      # ConfigMap with job template
 │   ├── dashboard-deployment.yaml
 │   ├── dashboard-service.yaml
 │   ├── ingress.yaml
@@ -619,8 +721,8 @@ helm/recon-engine/
 │   └── prometheusrule.yaml
 └── charts/
     ├── postgresql/
-    ├── redis/
-    └── minio/
+    ├── minio/
+    └── airbyte/
 ```
 
 ### 9.1 values.yaml
@@ -633,43 +735,36 @@ global:
 api:
   replicaCount: 3
   image:
-    repository: recon-engine/api
+    repository: reconciliation/spring-boot-api
     tag: latest
     pullPolicy: IfNotPresent
   resources:
     requests:
-      memory: "256Mi"
-      cpu: "250m"
-    limits:
       memory: "512Mi"
       cpu: "500m"
-  autoscaling:
-    enabled: true
-    minReplicas: 2
-    maxReplicas: 5
-    targetCPUUtilization: 70
+    limits:
+      memory: "1Gi"
+      cpu: "1000m"
 
-worker:
-  replicaCount: 3
+polarsJob:
   image:
-    repository: recon-engine/worker
+    repository: reconciliation/polars-engine
     tag: latest
   resources:
     requests:
-      memory: "1Gi"
-      cpu: "500m"
+      memory: "2Gi"
+      cpu: "1000m"
     limits:
-      memory: "4Gi"
-      cpu: "2000m"
-  autoscaling:
-    enabled: true
-    minReplicas: 3
-    maxReplicas: 10
+      memory: "8Gi"
+      cpu: "4000m"
+  backoffLimit: 3
+  activeDeadlineSeconds: 3600
+  ttlSecondsAfterFinished: 86400
 
 dashboard:
   replicaCount: 2
   image:
-    repository: recon-engine/dashboard
+    repository: reconciliation/dashboard
     tag: latest
 
 ingress:
@@ -692,13 +787,13 @@ postgresql:
     username: recon
     existingSecret: postgres-secrets
 
-redis:
-  enabled: true
-  architecture: standalone
-
 minio:
   enabled: true
-  defaultBuckets: "recon-results"
+  defaultBuckets: "recon-data"
+
+airbyte:
+  enabled: true
+  # See Airbyte Helm chart for full configuration
 ```
 
 ## 10. CI/CD Pipeline
@@ -716,27 +811,98 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
 
-      - name: Build and push images
-        run: |
-          docker build -t recon-engine/api:${{ github.sha }} ./api
-          docker build -t recon-engine/worker:${{ github.sha }} ./worker
-          docker build -t recon-engine/dashboard:${{ github.sha }} ./dashboard
-          docker push recon-engine/api:${{ github.sha }}
-          docker push recon-engine/worker:${{ github.sha }}
-          docker push recon-engine/dashboard:${{ github.sha }}
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ secrets.REGISTRY }}
+          username: ${{ secrets.REGISTRY_USERNAME }}
+          password: ${{ secrets.REGISTRY_PASSWORD }}
+
+      - name: Build and push Spring Boot API
+        uses: docker/build-push-action@v5
+        with:
+          context: ./api
+          push: true
+          tags: |
+            ${{ secrets.REGISTRY }}/reconciliation/spring-boot-api:${{ github.sha }}
+            ${{ secrets.REGISTRY }}/reconciliation/spring-boot-api:latest
+
+      - name: Build and push Polars Engine
+        uses: docker/build-push-action@v5
+        with:
+          context: ./polars-engine
+          push: true
+          tags: |
+            ${{ secrets.REGISTRY }}/reconciliation/polars-engine:${{ github.sha }}
+            ${{ secrets.REGISTRY }}/reconciliation/polars-engine:latest
+
+      - name: Build and push Dashboard
+        uses: docker/build-push-action@v5
+        with:
+          context: ./dashboard
+          push: true
+          tags: |
+            ${{ secrets.REGISTRY }}/reconciliation/dashboard:${{ github.sha }}
+            ${{ secrets.REGISTRY }}/reconciliation/dashboard:latest
 
   deploy:
     needs: build
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v3
+
+      - name: Configure kubectl
+        uses: azure/k8s-set-context@v3
+        with:
+          kubeconfig: ${{ secrets.KUBECONFIG }}
 
       - name: Deploy to Kubernetes
         run: |
           helm upgrade --install recon-engine ./helm/recon-engine \
+            --namespace recon \
+            --create-namespace \
             --set api.image.tag=${{ github.sha }} \
-            --set worker.image.tag=${{ github.sha }} \
-            --set dashboard.image.tag=${{ github.sha }}
+            --set polarsJob.image.tag=${{ github.sha }} \
+            --set dashboard.image.tag=${{ github.sha }} \
+            --wait
 ```
+
+## 11. Resource Sizing Guide
+
+### 11.1 Small Deployment (< 1M records)
+
+| Component | Replicas | Memory | CPU |
+|-----------|----------|--------|-----|
+| Spring Boot API | 2 | 512Mi | 500m |
+| Dashboard | 2 | 64Mi | 50m |
+| Polars Job | 1 | 2Gi | 1000m |
+| PostgreSQL | 1 | 1Gi | 500m |
+| MinIO | 1 | 512Mi | 250m |
+
+### 11.2 Medium Deployment (1M - 10M records)
+
+| Component | Replicas | Memory | CPU |
+|-----------|----------|--------|-----|
+| Spring Boot API | 3 | 1Gi | 1000m |
+| Dashboard | 2 | 128Mi | 100m |
+| Polars Job | 1 | 8Gi | 4000m |
+| PostgreSQL | 1 | 4Gi | 2000m |
+| MinIO | 1 | 2Gi | 1000m |
+
+### 11.3 Large Deployment (> 10M records)
+
+| Component | Replicas | Memory | CPU |
+|-----------|----------|--------|-----|
+| Spring Boot API | 5 | 2Gi | 2000m |
+| Dashboard | 3 | 256Mi | 200m |
+| Polars Job | 1 | 16Gi | 8000m |
+| PostgreSQL | HA cluster | 8Gi | 4000m |
+| MinIO | Distributed | 4Gi | 2000m |
