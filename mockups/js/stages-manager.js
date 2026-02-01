@@ -115,6 +115,15 @@ class StagesManager {
           stage.rules = [];
         }
 
+        // Ensure deduplicationOrder is initialized
+        if (!stage.deduplicationOrder) {
+          stage.deduplicationOrder = {
+            enabled: false,
+            left: [],
+            right: []
+          };
+        }
+
         // Ensure resultQueries have the new structure
         if (stage.resultQueries) {
           stage.resultQueries.forEach(query => {
@@ -174,6 +183,13 @@ class StagesManager {
           rightField: ''
         }
       ],
+
+      // Deduplication ordering for handling multiple matches
+      deduplicationOrder: {
+        enabled: false,
+        left: [],   // Array of { field, direction } objects
+        right: []   // Array of { field, direction } objects
+      },
 
       // Multiple named rules (optional - can be empty for JOIN-only matching)
       rules: [],
@@ -502,6 +518,9 @@ class StagesManager {
           <button class="btn btn-secondary btn-sm mt-2" id="add-join-btn">
             + Add JOIN Condition
           </button>
+
+          <!-- Deduplication Order -->
+          ${this.renderDeduplicationOrderSection(stage, availableFields)}
         </div>
 
         <!-- Matching Rules (Block Programming) -->
@@ -533,40 +552,6 @@ class StagesManager {
           <button class="btn btn-secondary btn-sm mt-2" id="add-query-btn">
             + Add Query
           </button>
-        </div>
-
-        <!-- Output Configuration -->
-        <div class="stage-config-section">
-          <h4>Output Paths</h4>
-          <div class="grid grid-3">
-            <div class="form-group">
-              <label class="checkbox">
-                <input type="checkbox" id="output-matched-enabled"
-                  ${stage.outputs.matched.enabled !== false ? 'checked' : ''}>
-                <span>Matched Records</span>
-              </label>
-              <input type="text" class="form-control mt-2" id="output-matched-path"
-                value="${this.escapeHtml(stage.outputs.matched.path)}" placeholder="/results/{run_id}/matched.csv">
-            </div>
-            <div class="form-group">
-              <label class="checkbox">
-                <input type="checkbox" id="output-unmatched-left-enabled"
-                  ${stage.outputs.unmatchedLeft.enabled !== false ? 'checked' : ''}>
-                <span>Unmatched Left</span>
-              </label>
-              <input type="text" class="form-control mt-2" id="output-unmatched-left-path"
-                value="${this.escapeHtml(stage.outputs.unmatchedLeft.path)}" placeholder="/results/{run_id}/unmatched_left.csv">
-            </div>
-            <div class="form-group">
-              <label class="checkbox">
-                <input type="checkbox" id="output-unmatched-right-enabled"
-                  ${stage.outputs.unmatchedRight.enabled !== false ? 'checked' : ''}>
-                <span>Unmatched Right</span>
-              </label>
-              <input type="text" class="form-control mt-2" id="output-unmatched-right-path"
-                value="${this.escapeHtml(stage.outputs.unmatchedRight.path)}" placeholder="/results/{run_id}/unmatched_right.csv">
-            </div>
-          </div>
         </div>
       </div>
     `;
@@ -627,6 +612,92 @@ class StagesManager {
           ).join('')}
         </select>
         <button class="join-condition-remove" data-action="remove" data-index="${index}" title="Remove">×</button>
+      </div>
+    `).join('');
+  }
+
+  /**
+   * Render deduplication order section
+   */
+  renderDeduplicationOrderSection(stage, availableFields) {
+    // Initialize deduplicationOrder if not present
+    if (!stage.deduplicationOrder) {
+      stage.deduplicationOrder = {
+        enabled: false,
+        left: [],
+        right: []
+      };
+    }
+
+    const dedup = stage.deduplicationOrder;
+    const isEnabled = dedup.enabled;
+
+    return `
+      <div class="deduplication-order-section mt-3">
+        <label class="checkbox">
+          <input type="checkbox" id="dedup-enabled" ${isEnabled ? 'checked' : ''}>
+          <span>Handle duplicate matches by ordering</span>
+        </label>
+
+        <div id="dedup-config" class="dedup-config-container" style="display: ${isEnabled ? 'block' : 'none'};">
+          <div class="alert alert-info mt-2 mb-3" style="font-size: 0.85rem;">
+            When multiple records match the JOIN conditions, order by these columns to select the first record.
+            Add multiple columns for tie-breaking.
+          </div>
+
+          <div class="dedup-columns-grid">
+            <!-- Left Source Order -->
+            <div class="dedup-column">
+              <label class="form-label">Left Source Order</label>
+              <div class="dedup-order-list" id="dedup-left-list">
+                ${this.renderDeduplicationOrderColumns(dedup.left, 'left', availableFields.left)}
+              </div>
+              <button class="btn btn-secondary btn-sm mt-2" data-action="add-dedup-column" data-side="left">
+                + Add Column
+              </button>
+            </div>
+
+            <!-- Right Source Order -->
+            <div class="dedup-column">
+              <label class="form-label">Right Source Order</label>
+              <div class="dedup-order-list" id="dedup-right-list">
+                ${this.renderDeduplicationOrderColumns(dedup.right, 'right', availableFields.right)}
+              </div>
+              <button class="btn btn-secondary btn-sm mt-2" data-action="add-dedup-column" data-side="right">
+                + Add Column
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  /**
+   * Render deduplication order columns for one side (left or right)
+   */
+  renderDeduplicationOrderColumns(columns, side, fields) {
+    if (!columns || columns.length === 0) {
+      return `<div class="dedup-empty-state text-gray" style="font-size: 0.85rem; padding: var(--spacing-sm);">No ordering columns. Click "Add Column" to add.</div>`;
+    }
+
+    const sourcePrefix = side === 'left' ? 'source_left' : 'source_right';
+
+    return columns.map((col, index) => `
+      <div class="dedup-order-row" data-index="${index}" data-side="${side}">
+        <span class="dedup-order-number">${index + 1}.</span>
+        <select class="form-control" data-field="field">
+          <option value="">-- Select field --</option>
+          ${fields.map(f => {
+            const fieldValue = `${sourcePrefix}.${f.name}`;
+            return `<option value="${fieldValue}" ${col.field === fieldValue ? 'selected' : ''}>${f.name}</option>`;
+          }).join('')}
+        </select>
+        <select class="form-control dedup-direction-select" data-field="direction">
+          <option value="desc" ${col.direction === 'desc' ? 'selected' : ''}>DESC</option>
+          <option value="asc" ${col.direction === 'asc' ? 'selected' : ''}>ASC</option>
+        </select>
+        <button class="dedup-remove-btn" data-action="remove-dedup-column" data-side="${side}" data-index="${index}" title="Remove">×</button>
       </div>
     `).join('');
   }
@@ -929,6 +1000,64 @@ class StagesManager {
       this.saveState();
     });
 
+    // Deduplication order
+    document.getElementById('dedup-enabled')?.addEventListener('change', (e) => {
+      if (!stage.deduplicationOrder) {
+        stage.deduplicationOrder = { enabled: false, left: [], right: [] };
+      }
+      stage.deduplicationOrder.enabled = e.target.checked;
+      document.getElementById('dedup-config').style.display = e.target.checked ? 'block' : 'none';
+      this.saveState();
+    });
+
+    // Deduplication order - add column buttons
+    document.querySelectorAll('[data-action="add-dedup-column"]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const side = btn.dataset.side;
+        if (!stage.deduplicationOrder) {
+          stage.deduplicationOrder = { enabled: true, left: [], right: [] };
+        }
+        stage.deduplicationOrder[side].push({
+          field: '',
+          direction: 'desc'
+        });
+        this.renderStage(index);
+        this.saveState();
+      });
+    });
+
+    // Deduplication order - remove column and field/direction changes
+    ['left', 'right'].forEach(side => {
+      const listContainer = document.getElementById(`dedup-${side}-list`);
+      if (!listContainer) return;
+
+      // Handle changes to field and direction
+      listContainer.addEventListener('change', (e) => {
+        const row = e.target.closest('.dedup-order-row');
+        if (!row) return;
+
+        const colIndex = parseInt(row.dataset.index);
+        const field = e.target.dataset.field;
+
+        if (field && stage.deduplicationOrder?.[side]?.[colIndex]) {
+          stage.deduplicationOrder[side][colIndex][field] = e.target.value;
+          this.saveState();
+        }
+      });
+
+      // Handle remove button clicks
+      listContainer.addEventListener('click', (e) => {
+        if (e.target.dataset.action === 'remove-dedup-column') {
+          const colIndex = parseInt(e.target.dataset.index);
+          if (stage.deduplicationOrder?.[side]) {
+            stage.deduplicationOrder[side].splice(colIndex, 1);
+            this.renderStage(index);
+            this.saveState();
+          }
+        }
+      });
+    });
+
     // Result queries
     const queriesContainer = document.getElementById('queries-container');
     queriesContainer?.addEventListener('change', (e) => {
@@ -1001,21 +1130,6 @@ class StagesManager {
       });
       this.renderStage(index);
       this.saveState();
-    });
-
-    // Output paths
-    ['matched', 'unmatchedLeft', 'unmatchedRight'].forEach(outputKey => {
-      const dashKey = outputKey.replace(/([A-Z])/g, '-$1').toLowerCase();
-
-      document.getElementById(`output-${dashKey}-enabled`)?.addEventListener('change', (e) => {
-        stage.outputs[outputKey].enabled = e.target.checked;
-        this.saveState();
-      });
-
-      document.getElementById(`output-${dashKey}-path`)?.addEventListener('change', (e) => {
-        stage.outputs[outputKey].path = e.target.value;
-        this.saveState();
-      });
     });
   }
 

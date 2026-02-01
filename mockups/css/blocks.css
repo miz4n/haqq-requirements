@@ -1101,3 +1101,99 @@
   border-color: var(--error);
   color: var(--error);
 }
+
+/* Deduplication Order Section */
+.deduplication-order-section {
+  border-top: 1px solid var(--gray-200);
+  padding-top: var(--spacing-md);
+}
+
+.dedup-config-container {
+  margin-top: var(--spacing-md);
+}
+
+.dedup-columns-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--spacing-lg);
+}
+
+.dedup-column {
+  background: var(--gray-50);
+  padding: var(--spacing-md);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--gray-200);
+}
+
+.dedup-column .form-label {
+  font-weight: 600;
+  font-size: 0.875rem;
+  color: var(--gray-700);
+  margin-bottom: var(--spacing-sm);
+  display: block;
+}
+
+.dedup-order-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-sm);
+  min-height: 40px;
+}
+
+.dedup-order-row {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  background: white;
+  padding: var(--spacing-sm);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--gray-200);
+}
+
+.dedup-order-number {
+  font-weight: 600;
+  color: var(--gray-500);
+  font-size: 0.875rem;
+  min-width: 24px;
+}
+
+.dedup-order-row .form-control {
+  flex: 1;
+  min-width: 0;
+}
+
+.dedup-direction-select {
+  max-width: 90px;
+  flex: 0 0 auto !important;
+}
+
+.dedup-remove-btn {
+  background: none;
+  border: none;
+  color: var(--gray-400);
+  cursor: pointer;
+  padding: var(--spacing-xs);
+  font-size: 1.1rem;
+  line-height: 1;
+  border-radius: var(--radius-sm);
+  transition: all 0.15s ease;
+}
+
+.dedup-remove-btn:hover {
+  background: #fee2e2;
+  color: var(--error);
+}
+
+.dedup-empty-state {
+  background: white;
+  border: 1px dashed var(--gray-300);
+  border-radius: var(--radius-sm);
+  text-align: center;
+}
+
+/* Responsive adjustments for dedup section */
+@media (max-width: 768px) {
+  .dedup-columns-grid {
+    grid-template-columns: 1fr;
+  }
+}

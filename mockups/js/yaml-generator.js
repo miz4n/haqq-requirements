@@ -325,6 +325,38 @@ const YAMLGenerator = {
         }
       });
 
+      // Deduplication ordering (when multiple matches exist)
+      if (stage.deduplicationOrder?.enabled) {
+        const hasLeftColumns = stage.deduplicationOrder.left?.length > 0;
+        const hasRightColumns = stage.deduplicationOrder.right?.length > 0;
+
+        if (hasLeftColumns || hasRightColumns) {
+          lines.push('');
+          lines.push('    # Deduplication ordering (when multiple matches exist)');
+          lines.push('    deduplication_order:');
+
+          if (hasLeftColumns) {
+            lines.push('      left:');
+            stage.deduplicationOrder.left.forEach(col => {
+              if (col.field) {
+                lines.push(`        - field: ${col.field}`);
+                lines.push(`          direction: ${col.direction || 'desc'}`);
+              }
+            });
+          }
+
+          if (hasRightColumns) {
+            lines.push('      right:');
+            stage.deduplicationOrder.right.forEach(col => {
+              if (col.field) {
+                lines.push(`        - field: ${col.field}`);
+                lines.push(`          direction: ${col.direction || 'desc'}`);
+              }
+            });
+          }
+        }
+      }
+
       // Matching rules (optional)
       if (stage.rules && stage.rules.length > 0) {
         lines.push('');

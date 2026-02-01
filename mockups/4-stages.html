@@ -61,58 +61,6 @@
   <!-- Main Content -->
   <main class="main-content">
     <div class="container-wide">
-      <!-- Job Configuration Card -->
-      <div class="card mb-4">
-        <div class="card-header">
-          <h2 class="card-title">Job Configuration</h2>
-          <p class="card-subtitle">Configure the reconciliation job settings</p>
-        </div>
-        <div class="card-body">
-          <div class="grid grid-2">
-            <div class="form-group">
-              <label class="form-label form-label-required">Job Name</label>
-              <input type="text" class="form-control" id="job-name" placeholder="daily_payment_reconciliation">
-              <span class="form-help">Unique identifier for this reconciliation job</span>
-            </div>
-            <div class="form-group">
-              <label class="form-label">Description</label>
-              <input type="text" class="form-control" id="job-description" placeholder="Daily reconciliation of payment transactions">
-            </div>
-          </div>
-
-          <!-- Schedule (Optional) -->
-          <div class="form-group mt-3">
-            <label class="checkbox">
-              <input type="checkbox" id="schedule-enabled">
-              <span>Enable Scheduled Execution</span>
-            </label>
-          </div>
-
-          <div id="schedule-config" style="display: none;" class="mt-3">
-            <div class="card" style="background: var(--gray-50); border: 1px solid var(--gray-200);">
-              <div class="card-body">
-                <div class="grid grid-2">
-                  <div class="form-group">
-                    <label class="form-label">Cron Expression</label>
-                    <input type="text" class="form-control" id="schedule-cron" placeholder="0 2 * * *">
-                    <span class="form-help">e.g., 0 2 * * * (daily at 2 AM)</span>
-                  </div>
-                  <div class="form-group">
-                    <label class="form-label">Auto-generate Date Range</label>
-                    <select class="form-control" id="schedule-range">
-                      <option value="previous_day">Previous Day</option>
-                      <option value="previous_hour">Previous Hour</option>
-                      <option value="previous_week">Previous Week</option>
-                      <option value="previous_month">Previous Month</option>
-                    </select>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-
       <!-- Stages Card -->
       <div class="card">
         <div class="card-header">
@@ -167,7 +115,6 @@
       tabsId: 'stage-tabs',
       onStateChange: (state) => {
         Storage.update('stages', state.stages);
-        Storage.update('job', state.job);
       }
     });
 
@@ -193,87 +140,10 @@
     } else {
       // Initialize with config
       stagesManager.initialize(config);
-
-      // Load job config into form
-      const jobConfig = config.job || config.reconciliation || {};
-      document.getElementById('job-name').value = jobConfig.name || '';
-      document.getElementById('job-description').value = jobConfig.description || '';
-
-      if (jobConfig.schedule) {
-        document.getElementById('schedule-enabled').checked = true;
-        document.getElementById('schedule-config').style.display = 'block';
-        document.getElementById('schedule-cron').value = jobConfig.schedule.cron || '';
-        document.getElementById('schedule-range').value = jobConfig.schedule.autoRange || 'previous_day';
-      }
-
-      // Auto-generate job name if empty
-      if (!jobConfig.name && config.sourceA && config.sourceB) {
-        document.getElementById('job-name').value = `${config.sourceA.name}_${config.sourceB.name}_reconciliation`;
-      }
     }
-
-    // Schedule toggle
-    document.getElementById('schedule-enabled')?.addEventListener('change', function() {
-      document.getElementById('schedule-config').style.display = this.checked ? 'block' : 'none';
-    });
-
-    // Job config change handlers
-    document.getElementById('job-name')?.addEventListener('change', function() {
-      stagesManager.jobConfig.name = this.value;
-      stagesManager.saveState();
-    });
-
-    document.getElementById('job-description')?.addEventListener('change', function() {
-      stagesManager.jobConfig.description = this.value;
-      stagesManager.saveState();
-    });
-
-    document.getElementById('schedule-cron')?.addEventListener('change', function() {
-      if (!stagesManager.jobConfig.schedule) {
-        stagesManager.jobConfig.schedule = {};
-      }
-      stagesManager.jobConfig.schedule.cron = this.value;
-      stagesManager.saveState();
-    });
-
-    document.getElementById('schedule-range')?.addEventListener('change', function() {
-      if (!stagesManager.jobConfig.schedule) {
-        stagesManager.jobConfig.schedule = {};
-      }
-      stagesManager.jobConfig.schedule.autoRange = this.value;
-      stagesManager.saveState();
-    });
-
-    document.getElementById('schedule-enabled')?.addEventListener('change', function() {
-      if (!this.checked) {
-        stagesManager.jobConfig.schedule = null;
-      } else {
-        stagesManager.jobConfig.schedule = {
-          cron: document.getElementById('schedule-cron').value || '',
-          autoRange: document.getElementById('schedule-range').value || 'previous_day'
-        };
-      }
-      stagesManager.saveState();
-    });
 
     // Validation
     App.validateCurrentStep = function() {
-      const jobName = document.getElementById('job-name')?.value;
-
-      if (!jobName || jobName.trim() === '') {
-        App.showNotification('Please provide a job name', 'error');
-        return false;
-      }
-
-      // Validate schedule if enabled
-      if (document.getElementById('schedule-enabled')?.checked) {
-        const cron = document.getElementById('schedule-cron')?.value;
-        if (!cron || cron.trim() === '') {
-          App.showNotification('Please provide a cron expression for the schedule', 'error');
-          return false;
-        }
-      }
-
       // Validate stages
       const errors = stagesManager.validate();
       if (errors.length > 0) {
@@ -284,14 +154,6 @@
       // Save final state
       const finalConfig = stagesManager.getConfiguration();
       Storage.update('stages', finalConfig.stages);
-      Storage.update('job', finalConfig.job);
-
-      // Also save in old format for backward compatibility
-      Storage.update('reconciliation', {
-        name: finalConfig.job.name,
-        description: finalConfig.job.description,
-        schedule: finalConfig.job.schedule
-      });
 
       App.showNotification('Stages and rules saved successfully!', 'success');
       return true;

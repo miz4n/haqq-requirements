@@ -293,10 +293,15 @@
       subtitle.textContent = `Run ID: ${report.runId} | Executed: ${startDate.toLocaleString()}`;
     }
 
-    // Render simplified summary cards (only 3)
+    // Render simplified summary cards
     function renderSummaryCards(report) {
       const container = document.getElementById('summary-cards');
       const summary = report.summary || {};
+
+      // Calculate total duplicates from all stages
+      const totalDuplicates = (report.stages || []).reduce((sum, stage) => {
+        return sum + (stage.matching?.duplicatesLeft || 0) + (stage.matching?.duplicatesRight || 0);
+      }, 0);
 
       container.innerHTML = `
         <div class="summary-card">
@@ -306,6 +311,10 @@
         <div class="summary-card success">
           <div class="summary-card-value">${(summary.totalMatched || 0).toLocaleString()}</div>
           <div class="summary-card-label">Matched</div>
+        </div>
+        <div class="summary-card warning">
+          <div class="summary-card-value">${totalDuplicates.toLocaleString()}</div>
+          <div class="summary-card-label">Duplicates</div>
         </div>
         <div class="summary-card primary">
           <div class="summary-card-value">${summary.matchRate || 0}%</div>
@@ -595,6 +604,9 @@
         const matched = stage.matching?.totalMatched || 0;
         const unmatchedLeft = stage.matching?.unmatchedLeft || 0;
         const unmatchedRight = stage.matching?.unmatchedRight || 0;
+        const duplicatesLeft = stage.matching?.duplicatesLeft || 0;
+        const duplicatesRight = stage.matching?.duplicatesRight || 0;
+        const totalDuplicates = duplicatesLeft + duplicatesRight;
         const leftRecords = stage.matching?.leftRecords || (matched + unmatchedLeft);
         const rightRecords = stage.matching?.rightRecords || (matched + unmatchedRight);
         const totalRecords = leftRecords + rightRecords;
@@ -633,6 +645,10 @@
                     <span class="stage-metric-value">${unmatchedRight.toLocaleString()}</span>
                     <span class="stage-metric-label">Unmatched Right</span>
                   </div>
+                  <div class="stage-metric duplicate">
+                    <span class="stage-metric-value">${totalDuplicates.toLocaleString()}</span>
+                    <span class="stage-metric-label">Duplicates</span>
+                  </div>
                   <div class="stage-metric primary">
                     <span class="stage-metric-value">${matchRate}%</span>
                     <span class="stage-metric-label">Match Rate</span>
@@ -658,6 +674,11 @@
                     <span class="download-icon">&#8595;</span>
                     <span class="download-label">Unmatched Right</span>
                     <span class="download-count">${unmatchedRight.toLocaleString()}</span>
+                  </button>
+                  <button class="download-btn duplicate" onclick="downloadResults('${stage.stageId}', 'duplicates', ${totalDuplicates})">
+                    <span class="download-icon">&#8595;</span>
+                    <span class="download-label">Duplicates</span>
+                    <span class="download-count">${totalDuplicates.toLocaleString()}</span>
                   </button>
                 </div>
               </div>

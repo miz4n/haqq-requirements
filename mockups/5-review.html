@@ -78,40 +78,14 @@
         </div>
       </div>
 
-      <!-- YAML Preview -->
-      <div class="card mb-4">
-        <div class="card-header">
-          <div style="display: flex; justify-content: space-between; align-items: center;">
-            <div>
-              <h2 class="card-title">Complete YAML Configuration</h2>
-              <p class="card-subtitle">Production-ready configuration file</p>
-            </div>
-            <div style="display: flex; gap: var(--spacing-md);">
-              <button class="btn btn-outline" onclick="copyYAML()">
-                Copy to Clipboard
-              </button>
-              <button class="btn btn-primary" onclick="downloadYAML()">
-                Download YAML
-              </button>
-            </div>
-          </div>
-        </div>
-        <div class="card-body">
-          <pre id="yaml-preview" style="background: var(--gray-900); color: var(--gray-100); padding: var(--spacing-lg); border-radius: var(--radius-md); font-size: 0.875rem; line-height: 1.6; overflow-x: auto; max-height: 600px; overflow-y: auto;"></pre>
-        </div>
-      </div>
-
       <!-- Actions -->
       <div class="card">
         <div class="card-body" style="text-align: center;">
           <h3 class="mb-3">What's Next?</h3>
-          <p class="text-gray mb-4">Run a test reconciliation with mock data, download the YAML configuration, or make changes to your setup.</p>
+          <p class="text-gray mb-4">Run a test reconciliation with mock data or make changes to your setup.</p>
           <div style="display: flex; gap: var(--spacing-md); justify-content: center; flex-wrap: wrap;">
             <button class="btn btn-outline" onclick="startOver()">
               Start Over
-            </button>
-            <button class="btn btn-outline" onclick="downloadYAML()">
-              Download YAML
             </button>
             <button class="btn btn-primary btn-lg" onclick="window.location.href='6-run.html'">
               Run Reconciliation
@@ -129,21 +103,15 @@
         <button class="btn btn-secondary" id="backBtn">
           ← Back
         </button>
-        <div style="display: flex; gap: var(--spacing-md);">
-          <button class="btn btn-outline" onclick="downloadYAML()">
-            Download YAML
-          </button>
-          <button class="btn btn-primary" onclick="window.location.href='6-run.html'">
-            Run Reconciliation →
-          </button>
-        </div>
+        <button class="btn btn-primary" onclick="window.location.href='6-run.html'">
+          Run Reconciliation →
+        </button>
       </div>
     </div>
   </div>
 
   <!-- Scripts -->
   <script src="js/storage.js"></script>
-  <script src="js/yaml-generator.js"></script>
   <script src="js/app.js"></script>
   <script>
     // Load complete configuration
@@ -374,36 +342,6 @@
       return html;
     }
 
-    // Generate and display YAML
-    function generateYAML() {
-      const yaml = YAMLGenerator.generateComplete(config);
-      const highlighted = YAMLGenerator.highlightYAML(yaml);
-      document.getElementById('yaml-preview').innerHTML = highlighted;
-      return yaml;
-    }
-
-    // Copy YAML to clipboard
-    function copyYAML() {
-      const yaml = YAMLGenerator.generateComplete(config);
-      App.copyToClipboard(yaml);
-    }
-
-    // Download YAML file
-    function downloadYAML() {
-      const yaml = YAMLGenerator.generateComplete(config);
-      const jobName = config.job?.name || config.reconciliation?.name || 'reconciliation';
-      const timestamp = new Date().toISOString().split('T')[0];
-      const filename = `${jobName}-${timestamp}.yaml`;
-
-      App.downloadFile(yaml, filename);
-      App.showNotification(`YAML configuration downloaded: ${filename}`, 'success');
-    }
-
-    // Save draft
-    function saveDraft() {
-      App.showNotification('Configuration saved as draft', 'success');
-    }
-
     // Start over
     function startOver() {
       if (confirm('Are you sure you want to start over? This will clear all configuration data.')) {
@@ -470,9 +408,6 @@
     // Initialize
     if (validateConfiguration()) {
       renderSummary();
-      generateYAML();
-    } else {
-      document.getElementById('yaml-preview').innerHTML = '<span style="color: var(--warning);">Configuration incomplete. Please complete all steps before generating YAML.</span>';
     }
 
     // Override validation

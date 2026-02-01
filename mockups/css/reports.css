@@ -808,7 +808,7 @@
 
 .stage-metrics-grid {
   display: grid;
-  grid-template-columns: repeat(6, 1fr);
+  grid-template-columns: repeat(7, 1fr);
   gap: var(--spacing-md);
 }
 
@@ -838,6 +838,11 @@
 .stage-metric.primary {
   border-left-color: var(--primary);
   background: #eff6ff;
+}
+
+.stage-metric.duplicate {
+  border-left-color: #8b5cf6;
+  background: #f5f3ff;
 }
 
 .stage-metric-value {
@@ -929,6 +934,15 @@
 
 .download-btn.query:hover {
   background: #dbeafe;
+}
+
+.download-btn.duplicate {
+  border-color: #8b5cf6;
+  background: #f5f3ff;
+}
+
+.download-btn.duplicate:hover {
+  background: #ede9fe;
 }
 
 .download-icon {
