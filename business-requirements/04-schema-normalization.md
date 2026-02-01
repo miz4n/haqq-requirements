@@ -42,11 +42,20 @@ schema:
 
 ## 3. Field Transformation
 
-Schema normalization handles all transformations through a unified field specification approach. Each field can specify:
-- **Simple mapping**: Direct source field mapping
-- **Type conversion**: Transformation from source type to target type
-- **Inline expressions**: Simple calculations and transformations
-- **Lua scripts**: Complex transformation logic
+Schema normalization handles all transformations through a unified field specification approach using **Polars expressions** and **Python functions**.
+
+### Transform Types
+
+| Type | Description | Performance | Use Case |
+|------|-------------|-------------|----------|
+| `expression` | Direct Polars expression | Fastest (vectorized, runs in Rust) | Most transformations |
+| `function` | Python function with `@numba.jit` | Fast (JIT compiled) | Complex business logic |
+
+Each field can specify:
+- **Simple mapping**: Direct source field mapping (no transform needed)
+- **Type conversion**: Using Polars `cast()` expressions
+- **Polars expressions**: Vectorized transformations using Polars API
+- **Python functions**: Numba-decorated functions for complex logic
 
 ### 3.1 Simple Field Mapping
 
@@ -72,31 +81,33 @@ schema:
       type: string
       source: txn_id
 
-    # Type conversion - string to decimal
+    # Type conversion - string to decimal (Polars expression)
     - name: amount
       type: decimal
       precision: 19
       scale: 4
       source: txn_amount
-      transform: "tonumber(value)"
+      transform:
+        type: expression
+        expr: pl.col("txn_amount").cast(pl.Decimal(precision=19, scale=4))
 
     # Direct mapping
     - name: currency
       type: string
       source: txn_currency
 
-    # Enum mapping via Lua
+    # Enum mapping (Polars when/then/otherwise)
     - name: status
       type: string
       source: txn_status
-      transform: |
-        if value == "SUCCESS" or value == "OK" then
-          return "COMPLETED"
-        elseif value == "FAILED" then
-          return "REJECTED"
-        else
-          return "UNKNOWN"
-        end
+      transform:
+        type: expression
+        expr: |
+          pl.when(pl.col("txn_status").is_in(["SUCCESS", "OK"]))
+            .then(pl.lit("COMPLETED"))
+            .when(pl.col("txn_status") == "FAILED")
+            .then(pl.lit("REJECTED"))
+            .otherwise(pl.lit("UNKNOWN"))
 ```
 
 ### 3.2 Nested Field Mapping
@@ -154,20 +165,24 @@ schema:
       type: decimal
       source: txn_amount
 
-    # Constant field - no source
+    # Constant field - no source (Polars literal)
     - name: source_system
       type: string
-      transform: "return 'PAYMENT_GATEWAY'"
+      transform:
+        type: expression
+        expr: pl.lit("PAYMENT_GATEWAY")
 
     # Constant field
     - name: region
       type: string
-      transform: "return 'US'"
+      transform:
+        type: expression
+        expr: pl.lit("US")
 ```
 
-### 3.4 Derived Fields with Inline Expressions
+### 3.4 Derived Fields with Polars Expressions
 
-**Requirement**: Create calculated fields from existing data using inline expressions or Lua scripts.
+**Requirement**: Create calculated fields from existing data using Polars expressions.
 
 **Example**: Field concatenation.
 
@@ -189,15 +204,17 @@ schema:
       type: string
       source: last_name
 
-    # Derived field - concatenation (inline expression)
+    # Derived field - concatenation (Polars expression)
     - name: full_name
       type: string
-      transform: "row.first_name .. ' ' .. row.last_name"
+      transform:
+        type: expression
+        expr: pl.concat_str([pl.col("first_name"), pl.lit(" "), pl.col("last_name")])
 ```
 
 **Result**: `full_name = "John Doe"`
 
-### 3.5 Field Splitting with Lua
+### 3.5 Field Splitting with Polars
 
 **Example**: Split full name into first and last name.
 
@@ -215,84 +232,84 @@ schema:
       type: string
       source: full_name
 
-    # Split first name
+    # Split first name (Polars string split)
     - name: first_name
       type: string
-      transform: |
-        local parts = {}
-        for part in string.gmatch(row.full_name, "%S+") do
-          table.insert(parts, part)
-        end
-        return parts[1] or ""
+      transform:
+        type: expression
+        expr: pl.col("full_name").str.split(" ").list.get(0).fill_null("")
 
     # Split last name
     - name: last_name
       type: string
-      transform: |
-        local parts = {}
-        for part in string.gmatch(row.full_name, "%S+") do
-          table.insert(parts, part)
-        end
-        return parts[2] or ""
+      transform:
+        type: expression
+        expr: pl.col("full_name").str.split(" ").list.get(1).fill_null("")
 ```
 
 ### 3.6 Type Conversions
 
-**Requirement**: All type conversions are handled through field transformations using inline expressions or Lua scripts.
+**Requirement**: All type conversions are handled through Polars expressions.
 
 **Example**: String to number, number to string, date parsing, boolean conversion.
 
 ```yaml
 schema:
   fields:
-    # String to decimal
+    # String to decimal (Polars cast)
     - name: amount
       type: decimal
       precision: 19
       scale: 4
       source: txn_amount
-      transform: "tonumber(value)"
+      transform:
+        type: expression
+        expr: pl.col("txn_amount").cast(pl.Decimal(precision=19, scale=4))
 
-    # Number to string with padding
+    # Number to string with padding (Polars format)
     - name: zip_code_str
       type: string
       source: zip_code
-      transform: "string.format('%05d', tonumber(value))"
+      transform:
+        type: expression
+        expr: pl.col("zip_code").cast(pl.Int64).cast(pl.Utf8).str.zfill(5)
 
-    # Date parsing with timezone
+    # Date parsing with timezone (Polars strptime + dt operations)
     - name: transaction_timestamp
       type: timestamp
       source: transaction_date
-      transform: |
-        -- Parse date string "2024-03-15" to timestamp in America/New_York, then convert to UTC
-        local dt = parse_datetime(value, "YYYY-MM-DD", "America/New_York")
-        return convert_timezone(dt, "UTC")
+      transform:
+        type: expression
+        expr: |
+          pl.col("transaction_date")
+            .str.strptime(pl.Datetime, "%Y-%m-%d")
+            .dt.replace_time_zone("America/New_York")
+            .dt.convert_time_zone("UTC")
 
-    # Boolean conversion from various formats
+    # Boolean conversion from various formats (Polars when/then)
     - name: is_active
       type: boolean
       source: active_flag
-      transform: |
-        local v = string.upper(tostring(value))
-        if v == "Y" or v == "YES" or v == "1" or v == "TRUE" then
-          return true
-        elseif v == "N" or v == "NO" or v == "0" or v == "FALSE" then
-          return false
-        else
-          return nil
-        end
+      transform:
+        type: expression
+        expr: |
+          pl.when(pl.col("active_flag").str.to_uppercase().is_in(["Y", "YES", "1", "TRUE"]))
+            .then(pl.lit(True))
+            .when(pl.col("active_flag").str.to_uppercase().is_in(["N", "NO", "0", "FALSE"]))
+            .then(pl.lit(False))
+            .otherwise(pl.lit(None))
 
-    # Null handling with default
+    # Null handling with default (Polars fill_null)
     - name: fee_amount
       type: decimal
       source: fee
       nullable: true
-      transform: |
-        if value == nil or value == "" then
-          return 0.00  -- Default value
-        else
-          return tonumber(value)
-        end
+      transform:
+        type: expression
+        expr: |
+          pl.col("fee")
+            .cast(pl.Decimal(precision=19, scale=4), strict=False)
+            .fill_null(pl.lit(0.00))
 ```
 
 ### 3.7 Arithmetic and Calculations
@@ -302,34 +319,38 @@ schema:
 ```yaml
 schema:
   fields:
-    # Simple arithmetic (inline)
+    # Simple arithmetic (Polars expression)
     - name: net_amount
       type: decimal
-      transform: "row.amount - row.fee_amount"
+      transform:
+        type: expression
+        expr: pl.col("amount") - pl.col("fee_amount")
 
-    # Percentage calculation (inline)
+    # Percentage calculation (Polars expression)
     - name: fee_percentage
       type: decimal
       precision: 5
       scale: 2
-      transform: "(row.fee_amount / row.amount) * 100"
+      transform:
+        type: expression
+        expr: (pl.col("fee_amount") / pl.col("amount")) * 100
 
-    # Conditional logic (inline)
+    # Conditional logic (Polars expression)
     - name: review_required
       type: boolean
-      transform: "row.amount > 10000"
+      transform:
+        type: expression
+        expr: pl.col("amount") > 10000
 
-    # Multi-condition (Lua)
+    # Multi-condition (Polars when/then)
     - name: risk_level
       type: string
-      transform: |
-        if row.amount > 100000 then
-          return "HIGH"
-        elseif row.amount > 10000 then
-          return "MEDIUM"
-        else
-          return "LOW"
-        end
+      transform:
+        type: expression
+        expr: |
+          pl.when(pl.col("amount") > 100000).then(pl.lit("HIGH"))
+            .when(pl.col("amount") > 10000).then(pl.lit("MEDIUM"))
+            .otherwise(pl.lit("LOW"))
 ```
 
 ### 3.8 String Manipulation
@@ -339,15 +360,24 @@ schema:
 ```yaml
 schema:
   fields:
-    # Extract substring (inline)
+    # Extract substring (Polars expression)
     - name: transaction_year
       type: string
-      transform: "string.sub(row.transaction_id, 1, 4)"
+      transform:
+        type: expression
+        expr: pl.col("transaction_id").str.slice(0, 4)
 
-    # Concatenation with formatting (inline)
+    # Concatenation with formatting (Polars expression)
     - name: display_amount
       type: string
-      transform: "row.currency .. ' ' .. string.format('%.2f', row.amount)"
+      transform:
+        type: expression
+        expr: |
+          pl.concat_str([
+            pl.col("currency"),
+            pl.lit(" "),
+            pl.col("amount").cast(pl.Float64).round(2).cast(pl.Utf8)
+          ])
 ```
 
 ### 3.9 Date Arithmetic
@@ -356,42 +386,69 @@ schema:
 
 ```yaml
 schema:
+  # Define reusable functions
+  functions:
+    business_days_between:
+      type: function
+      decorator: numba.jit(nopython=True)
+      code: |
+        def business_days_between(start_date: int, end_date: int) -> int:
+            """Calculate business days between two dates (as ordinals)."""
+            days = 0
+            current = start_date
+            while current < end_date:
+                # weekday: 0=Mon, 6=Sun
+                weekday = (current + 3) % 7  # Adjust for ordinal
+                if weekday < 5:  # Mon-Fri
+                    days += 1
+                current += 1
+            return days
+
   fields:
-    # T+2 settlement date (inline)
+    # T+2 settlement date (Polars expression)
     - name: expected_settlement_date
       type: date
-      transform: "add_days(row.transaction_date, 2)"
+      transform:
+        type: expression
+        expr: pl.col("transaction_date") + pl.duration(days=2)
 
-    # Days pending (inline)
+    # Days pending (Polars expression)
     - name: days_pending
       type: integer
-      transform: "days_between(row.transaction_date, current_date())"
+      transform:
+        type: expression
+        expr: (pl.lit(datetime.date.today()) - pl.col("transaction_date")).dt.total_days()
 
-    # Business days calculation (Lua script)
+    # Business days calculation (Numba function for complex logic)
     - name: business_days_to_settlement
       type: integer
-      transform: |
-        function calculate(row)
-          local txn_date = row.transaction_date
-          local settle_date = row.settlement_date
-          local days = 0
-          local current = txn_date
-
-          while current < settle_date do
-            local dow = weekday(current)
-            if dow >= 1 and dow <= 5 then  -- Mon-Fri
-              days = days + 1
-            end
-            current = add_days(current, 1)
-          end
-
-          return days
-        end
+      transform:
+        type: function
+        name: business_days_between
+        args: [transaction_date, settlement_date]
 ```
 
-### 3.10 Enum Mapping with Lua
+**Alternative using numpy for business days** (simpler, no Numba needed):
+```yaml
+schema:
+  fields:
+    - name: business_days_to_settlement
+      type: integer
+      transform:
+        type: expression
+        expr: |
+          # Using numpy's busday_count via map_batches
+          pl.struct(["transaction_date", "settlement_date"]).map_batches(
+            lambda s: pl.Series(np.busday_count(
+              s.struct["transaction_date"].to_numpy().astype("datetime64[D]"),
+              s.struct["settlement_date"].to_numpy().astype("datetime64[D]")
+            ))
+          )
+```
 
-**Requirement**: Enum mapping is handled through Lua transformations.
+### 3.10 Enum Mapping with Polars
+
+**Requirement**: Enum mapping is handled through Polars `when/then/otherwise` expressions.
 
 **Example**: Simple enum mapping.
 
@@ -401,17 +458,16 @@ schema:
     - name: status
       type: string
       source: txn_status
-      transform: |
-        local v = string.upper(value)
-        if v == "SUCCESS" or v == "OK" or v == "APPROVED" or v == "SETTLED" then
-          return "COMPLETED"
-        elseif v == "FAILED" or v == "ERROR" or v == "DECLINED" then
-          return "REJECTED"
-        elseif v == "PENDING" or v == "PROCESSING" then
-          return "IN_PROGRESS"
-        else
-          return "UNKNOWN"  -- Default fallback
-        end
+      transform:
+        type: expression
+        expr: |
+          pl.when(pl.col("txn_status").str.to_uppercase().is_in(["SUCCESS", "OK", "APPROVED", "SETTLED"]))
+            .then(pl.lit("COMPLETED"))
+            .when(pl.col("txn_status").str.to_uppercase().is_in(["FAILED", "ERROR", "DECLINED"]))
+            .then(pl.lit("REJECTED"))
+            .when(pl.col("txn_status").str.to_uppercase().is_in(["PENDING", "PROCESSING"]))
+            .then(pl.lit("IN_PROGRESS"))
+            .otherwise(pl.lit("UNKNOWN"))
 ```
 
 **Example**: Conditional enum mapping based on other fields.
@@ -422,89 +478,171 @@ schema:
     - name: status
       type: string
       source: txn_status
-      transform: |
-        local v = string.upper(value)
-        local txn_type = row.transaction_type
-
-        if v == "SUCCESS" or v == "OK" then
-          if txn_type == "REFUND" then
-            return "REFUND_COMPLETED"
-          elseif txn_type == "PAYMENT" then
-            if row.amount > 10000 then
-              return "COMPLETED_HIGH_VALUE"
-            else
-              return "PAYMENT_COMPLETED"
-            end
-          else
-            return "COMPLETED"
-          end
-        elseif v == "FAILED" or v == "ERROR" then
-          if txn_type == "REFUND" then
-            return "REFUND_FAILED"
-          else
-            return "REJECTED"
-          end
-        else
-          return "UNKNOWN"
-        end
+      transform:
+        type: expression
+        expr: |
+          # Complex conditional logic using nested when/then
+          pl.when(
+            pl.col("txn_status").str.to_uppercase().is_in(["SUCCESS", "OK"]) &
+            (pl.col("transaction_type") == "REFUND")
+          ).then(pl.lit("REFUND_COMPLETED"))
+          .when(
+            pl.col("txn_status").str.to_uppercase().is_in(["SUCCESS", "OK"]) &
+            (pl.col("transaction_type") == "PAYMENT") &
+            (pl.col("amount") > 10000)
+          ).then(pl.lit("COMPLETED_HIGH_VALUE"))
+          .when(
+            pl.col("txn_status").str.to_uppercase().is_in(["SUCCESS", "OK"]) &
+            (pl.col("transaction_type") == "PAYMENT")
+          ).then(pl.lit("PAYMENT_COMPLETED"))
+          .when(
+            pl.col("txn_status").str.to_uppercase().is_in(["SUCCESS", "OK"])
+          ).then(pl.lit("COMPLETED"))
+          .when(
+            pl.col("txn_status").str.to_uppercase().is_in(["FAILED", "ERROR"]) &
+            (pl.col("transaction_type") == "REFUND")
+          ).then(pl.lit("REFUND_FAILED"))
+          .when(
+            pl.col("txn_status").str.to_uppercase().is_in(["FAILED", "ERROR"])
+          ).then(pl.lit("REJECTED"))
+          .otherwise(pl.lit("UNKNOWN"))
 ```
 
-### 3.11 Complex Transformations with Lua
+### 3.11 Complex Transformations with Python Functions
+
+For complex business logic that cannot be expressed in Polars expressions, use Python functions decorated with `@numba.jit` for performance.
 
 **Example**: Tiered fee calculation based on amount and currency.
 
 ```yaml
 schema:
+  # Define reusable functions with Numba JIT compilation
+  functions:
+    calculate_tiered_fee:
+      type: function
+      decorator: numba.jit(nopython=True)
+      code: |
+        def calculate_tiered_fee(amount: float, is_usd: bool) -> float:
+            """Calculate tiered fee based on amount and currency."""
+            # Tiered fee structure
+            if amount <= 100:
+                base_fee = 2.50
+            elif amount <= 1000:
+                base_fee = 5.00
+            else:
+                base_fee = amount * 0.005  # 0.5%
+
+            # Add international fee
+            if not is_usd:
+                base_fee = base_fee + (amount * 0.01)  # +1%
+
+            # Round to 2 decimals
+            return round(base_fee * 100) / 100
+
   fields:
     - name: calculated_fee
       type: decimal
       precision: 19
       scale: 4
-      transform: |
-        function calculate(row)
-          local base_fee = 0.0
-          local amount = row.amount
-
-          -- Tiered fee structure
-          if amount <= 100 then
-            base_fee = 2.50
-          elseif amount <= 1000 then
-            base_fee = 5.00
-          else
-            base_fee = amount * 0.005  -- 0.5%
-          end
-
-          -- Add international fee
-          if row.currency ~= "USD" then
-            base_fee = base_fee + (amount * 0.01)  -- +1%
-          end
-
-          return math.floor(base_fee * 100 + 0.5) / 100  -- Round to 2 decimals
-        end
+      transform:
+        type: function
+        name: calculate_tiered_fee
+        args: [amount, "currency == 'USD'"]
 ```
 
-## 4. Lua Sandbox Environment
+**Usage in Polars**:
+```python
+import numba
+import polars as pl
 
-**Requirement**: Lua scripts must execute in a sandboxed environment for security.
+@numba.jit(nopython=True)
+def calculate_tiered_fee(amount: float, is_usd: bool) -> float:
+    if amount <= 100:
+        base_fee = 2.50
+    elif amount <= 1000:
+        base_fee = 5.00
+    else:
+        base_fee = amount * 0.005
 
-**Restrictions**:
-- No file I/O operations
-- No network operations
-- No OS command execution
-- Limited memory (configurable, default: 50MB)
-- Execution timeout (configurable, default: 5 seconds per row)
+    if not is_usd:
+        base_fee = base_fee + (amount * 0.01)
 
-**Available Built-in Functions**:
-- **Math**: `math.abs()`, `math.ceil()`, `math.floor()`, `round()`, `tonumber()`
-- **String**: `string.upper()`, `string.lower()`, `string.sub()`, `string.format()`, `string.gmatch()`
-- **Date**: `add_days()`, `add_months()`, `days_between()`, `weekday()`, `parse_datetime()`, `convert_timezone()`, `current_date()`
-- **Formatting**: `format_number()`, `format_date()`
-- **Type conversion**: `tostring()`, `tonumber()`
+    return round(base_fee * 100) / 100
 
-**Access to Row Data**:
-- Current row fields accessible via `row.field_name`
-- Source field accessible via `value` (for fields with `source` specified)
-- All fields defined earlier in schema available in `row`
+# Apply using map_elements
+df = df.with_columns(
+    pl.struct(["amount", "currency"])
+      .map_elements(
+          lambda row: calculate_tiered_fee(row["amount"], row["currency"] == "USD"),
+          return_dtype=pl.Float64
+      )
+      .alias("calculated_fee")
+)
+```
+
+## 4. Python/Polars Execution Environment
+
+**Requirement**: Transformations execute in a Python environment with Polars as the data processing framework.
+
+### 4.1 Transform Types
+
+| Type | Description | Performance | Use Case |
+|------|-------------|-------------|----------|
+| `expression` | Direct Polars expression | **Fastest** - vectorized, runs in Rust | 80-90% of transformations |
+| `function` | Python function with `@numba.jit` | **Fast** - JIT compiled | Complex business logic |
+
+### 4.2 Polars Expression Type
+
+Polars expressions are evaluated natively in Rust, providing maximum performance:
+
+```yaml
+transform:
+  type: expression
+  expr: pl.col("amount").cast(pl.Decimal(precision=19, scale=4))
+```
+
+**Available Polars Operations**:
+- **Type casting**: `.cast()` for type conversion
+- **String ops**: `.str.to_uppercase()`, `.str.strip_chars()`, `.str.split()`, `.str.slice()`
+- **Math ops**: arithmetic operators, `.abs()`, `.round()`
+- **Date/Time**: `.dt.total_days()`, `+ pl.duration()`, `.dt.convert_time_zone()`
+- **Conditionals**: `pl.when().then().otherwise()`, `.is_in()`, `.is_null()`
+- **Null handling**: `.fill_null()`, `.coalesce()`
+
+### 4.3 Python Function Type
+
+For complex logic, use Numba-decorated Python functions:
+
+```yaml
+functions:
+  my_function:
+    type: function
+    decorator: numba.jit(nopython=True)
+    code: |
+      def my_function(arg1: float, arg2: bool) -> float:
+          # Complex logic here
+          return result
+```
+
+**Execution via Polars**:
+- `map_elements()`: Row-by-row function application
+- `map_batches()`: Batch function application (faster for array operations)
+
+### 4.4 Resource Limits
+
+```yaml
+execution:
+  limits:
+    timeout_per_batch: 30s      # Max execution time per batch
+    max_memory: 500MB           # Memory limit for transformations
+    max_batch_size: 100000      # Rows per batch for map_batches
+```
+
+### 4.5 Access to Row Data
+
+- **In expressions**: Use `pl.col("field_name")` to reference columns
+- **In functions**: Row data passed as arguments defined in `args`
+- **Cross-field references**: All columns available in the DataFrame context
 
 ## 5. Schema Versioning
 
@@ -575,14 +713,16 @@ schema:
       required: true
       description: "Merchant identifier"
 
-    # Type conversion: string to decimal
+    # Type conversion: string to decimal (Polars expression)
     - name: amount
       type: decimal
       precision: 19
       scale: 4
       source: txn_amount
       required: true
-      transform: "tonumber(value)"
+      transform:
+        type: expression
+        expr: pl.col("txn_amount").cast(pl.Decimal(precision=19, scale=4))
       description: "Transaction amount"
 
     - name: currency
@@ -591,67 +731,71 @@ schema:
       required: true
       description: "ISO 4217 currency code"
 
-    # Type conversion with null handling
+    # Type conversion with null handling (Polars expression)
     - name: fee_amount
       type: decimal
       precision: 19
       scale: 4
       source: gateway_fee
       required: false
-      transform: |
-        if value == nil or value == "" then
-          return 0.00
-        else
-          return tonumber(value)
-        end
+      transform:
+        type: expression
+        expr: pl.col("gateway_fee").cast(pl.Decimal(precision=19, scale=4), strict=False).fill_null(0.00)
       description: "Processing fee"
 
-    # Derived field - calculation
+    # Derived field - calculation (Polars expression)
     - name: net_amount
       type: decimal
       precision: 19
       scale: 4
       required: false
-      transform: "row.amount - row.fee_amount"
+      transform:
+        type: expression
+        expr: pl.col("amount") - pl.col("fee_amount")
       description: "Amount after fees"
 
-    # Enum mapping via Lua
+    # Enum mapping (Polars when/then/otherwise)
     - name: status
       type: string
       source: txn_status
       required: true
-      transform: |
-        local v = string.upper(value)
-        if v == "SUCCESS" or v == "OK" or v == "SETTLED" then
-          return "COMPLETED"
-        elseif v == "FAILED" or v == "ERROR" or v == "DECLINED" then
-          return "REJECTED"
-        elseif v == "PENDING" or v == "PROCESSING" then
-          return "IN_PROGRESS"
-        else
-          return "UNKNOWN"
-        end
+      transform:
+        type: expression
+        expr: |
+          pl.when(pl.col("txn_status").str.to_uppercase().is_in(["SUCCESS", "OK", "SETTLED"]))
+            .then(pl.lit("COMPLETED"))
+            .when(pl.col("txn_status").str.to_uppercase().is_in(["FAILED", "ERROR", "DECLINED"]))
+            .then(pl.lit("REJECTED"))
+            .when(pl.col("txn_status").str.to_uppercase().is_in(["PENDING", "PROCESSING"]))
+            .then(pl.lit("IN_PROGRESS"))
+            .otherwise(pl.lit("UNKNOWN"))
       description: "Normalized transaction status"
 
-    # Timestamp conversion (UTC timezone)
+    # Timestamp conversion (Polars strptime - already UTC)
     - name: transaction_timestamp
       type: timestamp
       source: created_at
       required: true
-      transform: "parse_datetime(value, 'YYYY-MM-DDTHH:mm:ss.SSSZ', 'UTC')"
+      transform:
+        type: expression
+        expr: pl.col("created_at").str.strptime(pl.Datetime, "%Y-%m-%dT%H:%M:%S%.fZ")
       description: "Transaction creation time in UTC"
 
-    # Derived field - date arithmetic
+    # Derived field - date arithmetic (Polars duration)
     - name: settlement_date
       type: date
       required: false
-      transform: "add_days(row.transaction_timestamp, 2)"
+      transform:
+        type: expression
+        expr: (pl.col("transaction_timestamp") + pl.duration(days=2)).dt.date()
       description: "Expected settlement date (T+2)"
 
-    # Derived field - boolean condition
+    # Derived field - boolean condition (Polars expression)
     - name: is_high_value
       type: boolean
-      transform: "row.amount >= 10000"
+      transform:
+        type: expression
+        expr: pl.col("amount") >= 10000
       description: "High value transaction flag"
 ```
 
@@ -695,66 +839,71 @@ schema:
       source: currency_code
       required: true
 
-    # Type conversion with null handling
+    # Type conversion with null handling (Polars expression)
     - name: fee_amount
       type: decimal
       precision: 19
       scale: 4
       source: processing_fee
       required: false
-      transform: |
-        if value == nil or value == "" then
-          return 0.00
-        else
-          return tonumber(value)
-        end
+      transform:
+        type: expression
+        expr: pl.col("processing_fee").cast(pl.Decimal(precision=19, scale=4), strict=False).fill_null(0.00)
 
-    # Derived field - calculation
+    # Derived field - calculation (Polars expression)
     - name: net_amount
       type: decimal
       precision: 19
       scale: 4
       required: false
-      transform: "row.amount - row.fee_amount"
+      transform:
+        type: expression
+        expr: pl.col("amount") - pl.col("fee_amount")
 
-    # Enum mapping - Source B uses different status codes
+    # Enum mapping - Source B uses different status codes (Polars when/then)
     - name: status
       type: string
       source: status_code
       required: true
-      transform: |
-        local v = string.upper(value)
-        -- Source B already uses normalized status codes mostly
-        if v == "COMPLETED" or v == "APPROVED" then
-          return "COMPLETED"
-        elseif v == "REJECTED" or v == "FAILED" then
-          return "REJECTED"
-        elseif v == "IN_PROGRESS" or v == "PENDING" then
-          return "IN_PROGRESS"
-        else
-          return "UNKNOWN"
-        end
+      transform:
+        type: expression
+        expr: |
+          pl.when(pl.col("status_code").str.to_uppercase().is_in(["COMPLETED", "APPROVED"]))
+            .then(pl.lit("COMPLETED"))
+            .when(pl.col("status_code").str.to_uppercase().is_in(["REJECTED", "FAILED"]))
+            .then(pl.lit("REJECTED"))
+            .when(pl.col("status_code").str.to_uppercase().is_in(["IN_PROGRESS", "PENDING"]))
+            .then(pl.lit("IN_PROGRESS"))
+            .otherwise(pl.lit("UNKNOWN"))
 
-    # Timestamp conversion: America/New_York to UTC
+    # Timestamp conversion: America/New_York to UTC (Polars datetime)
     - name: transaction_timestamp
       type: timestamp
       source: created_at
       required: true
-      transform: |
-        local dt = parse_datetime(value, "YYYY-MM-DD HH:mm:ss", "America/New_York")
-        return convert_timezone(dt, "UTC")
+      transform:
+        type: expression
+        expr: |
+          pl.col("created_at")
+            .str.strptime(pl.Datetime, "%Y-%m-%d %H:%M:%S")
+            .dt.replace_time_zone("America/New_York")
+            .dt.convert_time_zone("UTC")
       description: "Transaction creation time normalized to UTC"
 
-    # Derived field - date arithmetic
+    # Derived field - date arithmetic (Polars duration)
     - name: settlement_date
       type: date
       required: false
-      transform: "add_days(row.transaction_timestamp, 2)"
+      transform:
+        type: expression
+        expr: (pl.col("transaction_timestamp") + pl.duration(days=2)).dt.date()
 
-    # Derived field - boolean condition
+    # Derived field - boolean condition (Polars expression)
     - name: is_high_value
       type: boolean
-      transform: "row.amount >= 10000"
+      transform:
+        type: expression
+        expr: pl.col("amount") >= 10000
 ```
 
 ## 7. Validation Rules

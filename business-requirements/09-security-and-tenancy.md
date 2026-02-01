@@ -1,19 +1,20 @@
-# Security and Tenancy
+# Security
 
 ## 1. Overview
 
-As a multi-tenant SaaS platform, the reconciliation engine must provide:
-- **Authentication**: Verify user identity via OAuth2
+The reconciliation engine is a **single-tenant application** deployed per organization. Security requirements include:
+
+- **Authentication**: Verify user identity via OAuth2/SSO
 - **Authorization**: Role-based access control (RBAC)
-- **Tenant Isolation**: Complete data segregation between tenants
 - **Credential Security**: Encrypted storage of sensitive credentials
 - **Audit Logging**: Track all user actions and system events
+- **Data Protection**: Encryption at rest and in transit
 
 ## 2. Authentication
 
-### 2.1 OAuth 2.0
+### 2.1 OAuth 2.0 / SSO
 
-**Requirement**: All user authentication must use OAuth 2.0.
+**Requirement**: User authentication via OAuth 2.0 or organizational SSO.
 
 **Supported Flows**:
 - **Authorization Code Flow**: For web application login
@@ -42,7 +43,6 @@ authentication:
 ```json
 {
   "sub": "user@company.com",
-  "tenant_id": "TENANT-001",
   "roles": ["reconciliation_analyst", "data_viewer"],
   "iat": 1710499800,
   "exp": 1710503400,
@@ -71,10 +71,9 @@ session:
 
 | Role | Permissions |
 |------|-------------|
-| `reconciliation_viewer` | View reconciliation results, export data |
-| `reconciliation_analyst` | Run reconciliations, create queries, view all results |
-| `reconciliation_admin` | Configure sources, rules, schemas, manage users |
-| `system_admin` | Full system access, tenant management |
+| `viewer` | View reconciliation results, export data |
+| `analyst` | Run reconciliations, create queries, view all results |
+| `admin` | Configure sources, rules, schemas, manage users |
 
 ### 3.2 Permissions
 
@@ -102,9 +101,8 @@ session:
 ```yaml
 user:
   email: jane.smith@company.com
-  tenant_id: TENANT-001
   roles:
-    - reconciliation_analyst
+    - analyst
   custom_permissions:
     - datasource:read  # Additional permission beyond role
 ```
@@ -113,8 +111,6 @@ user:
 
 **Requirement**: Control access at individual resource level.
 
-**Example**: User can only access reconciliations they created or are assigned to.
-
 ```yaml
 reconciliation:
   name: payment_gateway_recon
@@ -122,86 +118,15 @@ reconciliation:
   permissions:
     - user: jane.smith@company.com
       level: read
-    - role: reconciliation_analyst
+    - role: analyst
       level: execute
     - team: finance_team
       level: write
 ```
 
-## 4. Multi-Tenancy
+## 4. Credential Security
 
-### 4.1 Tenant Isolation
-
-**Requirement**: Complete data isolation between tenants.
-
-**Tenant Model**:
-```yaml
-tenant:
-  tenant_id: TENANT-001
-  name: "Acme Financial Services"
-  status: active
-  created_at: 2024-01-01T00:00:00Z
-  subscription_tier: enterprise
-
-  isolation:
-    data_encryption: tenant_specific_key
-    database_schema: tenant_001
-    storage_path: /tenants/tenant-001/
-```
-
-### 4.2 Tenant-Specific Resources
-
-**All resources are scoped to tenant**:
-- Data sources
-- Schemas
-- Matching rules
-- Reconciliation configurations
-- Results
-- Users
-
-**Database Structure**:
-```sql
--- All tables have tenant_id column
-CREATE TABLE reconciliations (
-  id UUID PRIMARY KEY,
-  tenant_id VARCHAR(50) NOT NULL,
-  name VARCHAR(255),
-  ...
-  INDEX idx_tenant (tenant_id)
-);
-
--- Row-level security
-CREATE POLICY tenant_isolation ON reconciliations
-  FOR ALL
-  USING (tenant_id = current_setting('app.current_tenant_id'));
-```
-
-### 4.3 Cross-Tenant Operations
-
-**Requirement**: Strictly prevent cross-tenant data access.
-
-**Safeguards**:
-1. All queries automatically filtered by `tenant_id`
-2. API requests validated against user's tenant
-3. File storage segregated by tenant
-4. Encryption keys unique per tenant
-
-### 4.4 Tenant Management
-
-**System Admin Operations**:
-```yaml
-tenant_operations:
-  - create_tenant
-  - suspend_tenant
-  - delete_tenant
-  - transfer_resources
-  - backup_tenant_data
-  - restore_tenant_data
-```
-
-## 5. Credential Security
-
-### 5.1 Encryption at Rest
+### 4.1 Encryption at Rest
 
 **Requirement**: All sensitive credentials encrypted at rest.
 
@@ -215,16 +140,16 @@ tenant_operations:
 ```yaml
 encryption:
   algorithm: AES-256-GCM
-  key_management: AWS KMS  # or HashiCorp Vault, Azure Key Vault
-  key_rotation: automatic
-  rotation_period: 90 days
+  key_management: file  # or: aws_kms, hashicorp_vault, azure_keyvault
+  key_rotation: manual
 ```
 
-### 5.2 Secret Storage
+### 4.2 Secret Storage
 
-**Requirement**: Integrate with external secret management systems.
+**Requirement**: Support external secret management or local encrypted storage.
 
 **Supported Providers**:
+- Local encrypted file (default)
 - HashiCorp Vault
 - AWS Secrets Manager
 - Azure Key Vault
@@ -233,56 +158,34 @@ encryption:
 **Configuration**:
 ```yaml
 secret_manager:
-  provider: aws_secrets_manager
-  region: us-east-1
-  credentials:
-    role_arn: arn:aws:iam::123456789012:role/reconciliation-engine
-
-  secret_prefix: /reconciliation/{tenant_id}/
+  provider: local  # or: hashicorp_vault, aws_secrets_manager
+  local:
+    path: /etc/reconciliation/secrets.enc
+    key_file: /etc/reconciliation/master.key
 ```
 
 **Secret Reference**:
 ```yaml
 datasource:
-  password: ${SECRET:aws:payment_gateway_password}
-  api_key: ${SECRET:vault:api_keys/payment_gateway}
+  password: ${SECRET:payment_gateway_password}
+  api_key: ${SECRET:api_keys/payment_gateway}
 ```
 
-### 5.3 Credential Rotation
+### 4.3 Credential Rotation
 
-**Requirement**: Support automatic credential rotation.
+**Requirement**: Support credential rotation with notifications.
 
 ```yaml
 credential_rotation:
-  enabled: true
-  rotation_schedule: 90 days
   notification:
     before_expiry: 7 days
     notify:
-      - datasource_owner@company.com
-      - security_team@company.com
+      - admin@company.com
 ```
 
-### 5.4 Access Control for Secrets
+## 5. Data Security
 
-**Requirement**: Secrets accessible only to authorized users and services.
-
-```yaml
-secret:
-  name: payment_gateway_api_key
-  tenant_id: TENANT-001
-  access_control:
-    users:
-      - john.doe@company.com
-    roles:
-      - reconciliation_admin
-    services:
-      - reconciliation_engine
-```
-
-## 6. Data Security
-
-### 6.1 Encryption in Transit
+### 5.1 Encryption in Transit
 
 **Requirement**: All data transmission encrypted via TLS 1.2+.
 
@@ -294,7 +197,7 @@ network_security:
     - TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256
 ```
 
-### 6.2 Data Masking
+### 5.2 Data Masking
 
 **Requirement**: Mask sensitive fields in logs and UI.
 
@@ -320,7 +223,7 @@ data_masking:
       replacement: "********"
 ```
 
-### 6.3 PII Handling
+### 5.3 PII Handling
 
 **Requirement**: Identify and protect personally identifiable information (PII).
 
@@ -335,16 +238,14 @@ pii_fields:
 pii_protection:
   encryption: required
   access_logging: enabled
-  retention_limit: 365 days
 ```
 
-### 6.4 Data Retention
+### 5.4 Data Retention
 
-**Requirement**: Configurable retention policies per tenant.
+**Requirement**: Configurable retention policies.
 
 ```yaml
 retention_policy:
-  tenant_id: TENANT-001
   reconciliation_results:
     duration: 730 days  # 2 years
     after_expiry: delete
@@ -360,9 +261,9 @@ retention_policy:
   cleanup_schedule: "0 2 * * *"  # Daily at 2 AM
 ```
 
-## 7. Audit Logging
+## 6. Audit Logging
 
-### 7.1 Audit Events
+### 6.1 Audit Events
 
 **Requirement**: Log all security-relevant events.
 
@@ -377,13 +278,12 @@ retention_policy:
 - Configuration changes
 - Secret access
 
-### 7.2 Audit Log Structure
+### 6.2 Audit Log Structure
 
 ```yaml
 audit_log:
   event_id: AUDIT-2024-03-15-0001
   timestamp: 2024-03-15T12:00:00Z
-  tenant_id: TENANT-001
   user_id: john.doe@company.com
   event_type: reconciliation_executed
   action: execute
@@ -399,7 +299,7 @@ audit_log:
     duration: 45s
 ```
 
-### 7.3 Audit Log Retention
+### 6.3 Audit Log Retention
 
 **Requirement**: Retain audit logs for compliance.
 
@@ -410,13 +310,7 @@ audit_retention:
   storage: append_only
 ```
 
-### 7.4 Audit Log Access
-
-**Requirement**: Restrict audit log access to authorized users.
-
-**Permissions**: Only `audit:read` permission holders can view logs.
-
-### 7.5 Security Alerts
+### 6.4 Security Alerts
 
 **Requirement**: Alert on suspicious activities.
 
@@ -425,7 +319,6 @@ audit_retention:
 - Access from new IP address
 - Unusual data export volume
 - Permission escalation
-- Credential access outside business hours
 
 ```yaml
 security_alerts:
@@ -434,24 +327,23 @@ security_alerts:
     window: 600 seconds
     action:
       - lock_account
-      - notify: security_team@company.com
+      - notify: admin@company.com
 
   - condition: unusual_export
     threshold: 100000 records
     action:
       - require_approval
-      - notify: datasource_owner
+      - notify: admin@company.com
 ```
 
-## 8. Network Security
+## 7. Network Security
 
-### 8.1 IP Whitelisting
+### 7.1 IP Whitelisting (Optional)
 
 **Requirement**: Support IP-based access restrictions.
 
 ```yaml
 network_access:
-  tenant_id: TENANT-001
   ip_whitelist:
     - 203.0.113.0/24
     - 198.51.100.50
@@ -459,7 +351,7 @@ network_access:
     - 192.0.2.0/24
 ```
 
-### 8.2 VPC/Private Network Access
+### 7.2 Private Network Access
 
 **Requirement**: Support private network connectivity for data sources.
 
@@ -467,9 +359,53 @@ network_access:
 datasource:
   type: database
   connection:
-    host: internal-db.vpc.company.com
-    network: vpc_peering
-    vpc_id: vpc-12345678
+    host: internal-db.company.local
+    network: private
+```
+
+## 8. Deployment Security
+
+### 8.1 Single-Tenant Deployment
+
+The application is deployed as a single-tenant instance per organization:
+
+```yaml
+deployment:
+  type: single_tenant
+  organization: "Acme Financial Services"
+  environment: production
+
+  isolation:
+    database: dedicated
+    storage: dedicated
+    compute: dedicated
+```
+
+### 8.2 Environment Configuration
+
+```yaml
+environments:
+  production:
+    authentication:
+      provider: oauth2
+      endpoint: https://sso.company.com
+    database:
+      host: prod-db.company.local
+      ssl: required
+    logging:
+      level: info
+      audit: enabled
+
+  staging:
+    authentication:
+      provider: oauth2
+      endpoint: https://sso-staging.company.com
+    database:
+      host: staging-db.company.local
+      ssl: required
+    logging:
+      level: debug
+      audit: enabled
 ```
 
 ## 9. Compliance
@@ -488,10 +424,8 @@ datasource:
 **Requirements**:
 - Data subject access requests (export user's data)
 - Right to deletion (delete user's data)
-- Data processing agreements
 - Data breach notification
 
-**Configuration**:
 ```yaml
 gdpr:
   enabled: true
@@ -507,7 +441,6 @@ gdpr:
 **Requirements** (if handling card data):
 - Cardholder data masking
 - Restricted access to card data
-- Regular security audits
 - Encrypted transmission and storage
 
 ## 10. Incident Response
@@ -520,13 +453,11 @@ incident_response:
     - automated_alerts
     - manual_reporting
   containment:
-    - isolate_affected_tenant
     - revoke_compromised_credentials
     - block_suspicious_ips
   notification:
-    - tenant_admin
-    - security_team
-    - compliance_team
+    - admin@company.com
+    - security_team@company.com
   remediation:
     - patch_vulnerability
     - reset_credentials
@@ -541,8 +472,8 @@ incident_response:
 
 1. **SSO Integration**: Support for SAML/LDAP in addition to OAuth2?
 
-3. **API Rate Limiting**: Per-user or per-tenant rate limits to prevent abuse?
+2. **API Rate Limiting**: Per-user rate limits to prevent abuse?
 
-6. **Bring Your Own Key (BYOK)**: Allow tenants to provide their own encryption keys?
+3. **Backup Encryption**: Require encryption for database backups?
 
-7. **Zero-Trust Architecture**: Implement zero-trust network access for all connections?
+4. **Two-Factor Authentication**: Require 2FA for admin users?
