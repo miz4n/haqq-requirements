@@ -1,695 +1,562 @@
-# Job Queue Design
+# Job Queue Design (Temporal-Based)
 
 ## 1. Overview
 
-The job queue manages reconciliation job execution with rate limiting at two levels:
-- **System-wide limit**: Maximum total parallel jobs across all configurations
-- **Per-configuration limit**: Maximum parallel jobs for a single configuration (prevents resource hogging)
+The reconciliation system uses **Temporal** for workflow orchestration, replacing the previous PostgreSQL-based job queue and Kubernetes Job management.
 
-The design uses PostgreSQL for queue persistence and K8s events for crash recovery.
+### 1.1 What Temporal Replaces
+
+| Previous Mechanism | Temporal Replacement |
+|-------------------|---------------------|
+| `job_queue` PostgreSQL table | Temporal workflow history (event-sourced) |
+| SQL COUNT for rate limiting | Worker `max_concurrent_activities` |
+| K8s Job watcher for failures | Activity heartbeat timeout |
+| HTTP callback handlers | Activity completion within workflow |
+| Manual retry state machine | Declarative retry policies |
+| Startup recovery code | Automatic workflow resumption |
+| `processNextInQueue()` logic | Task queue scheduling |
+| `canLaunchMore()` checks | Worker concurrency configuration |
+
+### 1.2 Key Concepts
+
+| Concept | Description |
+|---------|-------------|
+| **Workflow** | Durable function that orchestrates the entire reconciliation |
+| **Activity** | Single unit of work (e.g., execute one stage) |
+| **Task Queue** | Named queue that routes work to workers |
+| **Worker** | Process that polls task queues and executes workflows/activities |
+| **Heartbeat** | Signal from activity to indicate it's still running |
+| **Checkpoint** | Automatic persistence of activity completion in workflow history |
+
+### 1.3 Architectural Principles
+
+- **Java API only triggers** - No stage orchestration in Java
+- **Python orchestrates everything** - Workflow and all stage activities run in Python
+- **Generic pre-defined activities** - `stage_1` through `stage_10` for resumability
+- **S3 checkpointing** - State persisted between stages for durability
 
 ## 2. Architecture
 
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                           Job Execution Flow                                 │
-├─────────────────────────────────────────────────────────────────────────────┤
-│                                                                              │
-│   POST /api/v1/jobs                                                         │
-│         │                                                                    │
-│         ▼                                                                    │
-│   ┌─────────────────────────────────────────────────────────────────────┐   │
-│   │  Rate Limit Check                                                    │   │
-│   │  1. System limit: running_total < max_parallel_jobs?                │   │
-│   │  2. Config limit: running_for_config < config.max_concurrent_jobs?  │   │
-│   └────────────────────────────────┬────────────────────────────────────┘   │
-│                                    │                                         │
-│                       ┌────────────┴────────────┐                           │
-│                       │                         │                           │
-│                  LIMIT REACHED            WITHIN LIMITS                     │
-│                       │                         │                           │
-│                       ▼                         ▼                           │
-│                 ┌───────────┐            ┌───────────┐                      │
-│                 │  Queue    │            │  Launch   │                      │
-│                 │ (pending) │            │  K8s Job  │                      │
-│                 └───────────┘            └─────┬─────┘                      │
-│                                                │                            │
-│                                                ▼                            │
-│                              ┌─────────────────────────────┐               │
-│                              │  K8s Job (Python/Polars)    │               │
-│                              │                             │               │
-│                              │  On Success: POST /callback─┼──┐            │
-│                              │  On Crash: K8s Event ───────┼──┼──┐         │
-│                              └─────────────────────────────┘  │  │         │
-│                                                               │  │         │
-│   ┌───────────────────────────────────────────────────────────┼──┼─────┐   │
-│   │  Event Handlers                                           ▼  ▼     │   │
-│   │   ┌────────────────────────┐    ┌────────────────────────────┐    │   │
-│   │   │  Callback Handler      │    │  K8s Watch Handler         │    │   │
-│   │   │  1. Mark completed     │    │  1. Check retry count      │    │   │
-│   │   │  2. Check pending jobs │    │  2. Retry OR mark failed   │    │   │
-│   │   │  3. Launch if within   │    │  3. Launch pending if      │    │   │
-│   │   │     rate limits        │    │     within rate limits     │    │   │
-│   │   └────────────────────────┘    └────────────────────────────┘    │   │
-│   └───────────────────────────────────────────────────────────────────┘   │
-└─────────────────────────────────────────────────────────────────────────────┘
-```
+```mermaid
+flowchart TB
+    subgraph "Java Backend"
+        API[Spring Boot API]
+        TC[Temporal Client]
+    end
 
-## 2.1 Rate Limiting Rules
+    subgraph "Temporal Server"
+        TS[Temporal Service]
+        TQ[Task Queues]
+        TH[Workflow History]
+        TUI[Temporal UI]
+    end
 
-| Check | Condition | Action |
-|-------|-----------|--------|
-| System limit | `total_running >= max_parallel_jobs` | Queue job |
-| Config limit | `config_running >= config.max_concurrent_jobs` | Queue job |
-| Both within limits | Both checks pass | Launch immediately |
+    subgraph "Python Worker"
+        PW[Worker Process]
+        WF[ReconciliationWorkflow]
 
-## 3. Database Schema
+        subgraph "Generic Stage Activities"
+            S1[stage_1]
+            S2[stage_2]
+            S3[stage_3]
+            SN[stage_N ...]
+        end
+    end
 
-### 3.1 Job Queue Table
+    subgraph "Storage"
+        S3B[(S3 Parquet)]
+        PG[(PostgreSQL)]
+    end
 
-```sql
-CREATE TABLE job_queue (
-    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    config_id       UUID NOT NULL REFERENCES reconciliations(id),
-    status          VARCHAR(20) NOT NULL DEFAULT 'pending',
-    k8s_job_name    VARCHAR(255),
-    k8s_pod_name    VARCHAR(255),
+    API -->|"POST /runs"| TC
+    TC -->|"StartWorkflow()"| TS
+    TS -->|Dispatch| TQ
+    TQ -->|Poll| PW
+    PW --> WF
+    WF --> S1
+    S1 -->|Checkpoint| S3B
+    S1 --> S2
+    S2 -->|Checkpoint| S3B
+    S2 --> S3
+    S3 --> SN
+    SN -->|Final Results| S3B
 
-    -- Retry tracking
-    attempt         INT NOT NULL DEFAULT 0,
-    max_attempts    INT NOT NULL DEFAULT 3,
-
-    -- Job parameters
-    date_range_start TIMESTAMP,
-    date_range_end   TIMESTAMP,
-    parameters       JSONB,
-
-    -- Timestamps
-    created_at      TIMESTAMP NOT NULL DEFAULT NOW(),
-    started_at      TIMESTAMP,
-    completed_at    TIMESTAMP,
-
-    -- Results
-    result_status   VARCHAR(20),  -- success, failed, timeout
-    result_path     VARCHAR(500), -- S3 path to results
-    error_message   TEXT,
-
-    -- Constraints
-    CONSTRAINT valid_status CHECK (status IN ('pending', 'running', 'completed', 'failed', 'cancelled'))
-);
-
--- Indexes
-CREATE INDEX idx_job_queue_config_status ON job_queue(config_id, status);
-CREATE INDEX idx_job_queue_pending ON job_queue(created_at) WHERE status = 'pending';
-CREATE INDEX idx_job_queue_running ON job_queue(config_id) WHERE status = 'running';
-CREATE INDEX idx_job_queue_k8s_job ON job_queue(k8s_job_name) WHERE k8s_job_name IS NOT NULL;
+    TS -->|History| TH
+    TH --> PG
 ```
 
-### 3.2 Reconciliation Config Table (Rate Limit Settings)
+### 2.1 Component Responsibilities
 
-```sql
--- Add rate limit column to reconciliations table
-ALTER TABLE reconciliations ADD COLUMN max_concurrent_jobs INT NOT NULL DEFAULT 1;
+| Component | Responsibility |
+|-----------|---------------|
+| **Java API** | Receives requests, starts Temporal workflows, queries status |
+| **Temporal Server** | Manages workflow state, task queues, history persistence |
+| **Python Worker** | Runs workflows and activities, executes Polars logic |
+| **S3** | Stores intermediate results between stages, final outputs |
+| **PostgreSQL** | Temporal's backend for workflow history (separate from app DB) |
+
+## 3. Workflow Execution Flow
+
+```mermaid
+sequenceDiagram
+    participant API as Java API
+    participant TS as Temporal Server
+    participant WF as Python Workflow
+    participant S1 as stage_1 Activity
+    participant S2 as stage_2 Activity
+    participant S3 as S3 Storage
+
+    API->>TS: StartWorkflow(workflow_config)
+    TS->>WF: Execute ReconciliationWorkflow
+
+    WF->>S1: Execute(stage_config[0], datasource_paths)
+    S1->>S3: Load from datasources
+    S1->>S3: Write checkpoint (matched, unmatched, etc.)
+    S1-->>WF: StageResult(output_s3_paths)
+    Note over TS: Activity 1 completed - checkpointed
+
+    WF->>S2: Execute(stage_config[1], stage_1_output_paths)
+    S2->>S3: Read previous stage output
+    S2->>S3: Write checkpoint
+    S2-->>WF: StageResult(output_s3_paths)
+    Note over TS: Activity 2 completed - checkpointed
+
+    WF->>TS: Workflow complete
+    TS->>API: Result available
 ```
 
-### 3.3 System Settings Table
+## 4. Resumability After Failure
 
-```sql
-CREATE TABLE system_settings (
-    key             VARCHAR(100) PRIMARY KEY,
-    value           VARCHAR(500) NOT NULL,
-    updated_at      TIMESTAMP NOT NULL DEFAULT NOW()
-);
+Temporal automatically resumes workflows from the last checkpoint. Completed activities are **not re-executed**.
 
--- Default system-wide limit
-INSERT INTO system_settings (key, value) VALUES ('max_parallel_jobs', '10');
-INSERT INTO system_settings (key, value) VALUES ('default_max_concurrent_jobs', '1');
+```mermaid
+sequenceDiagram
+    participant TS as Temporal Server
+    participant WF as Python Workflow
+    participant S1 as stage_1
+    participant S2 as stage_2
+    participant S3 as stage_3
+
+    Note over TS: Worker crashed during stage_3
+
+    TS->>WF: Replay workflow from history
+
+    Note over WF,S1: Stage 1 result replayed from history<br/>(activity NOT re-executed)
+    Note over WF,S2: Stage 2 result replayed from history<br/>(activity NOT re-executed)
+
+    WF->>S3: Execute(stage_config[2], stage_2_output_paths)
+    Note over S3: Only stage_3 actually runs
+    S3-->>WF: StageResult
+
+    WF->>TS: Workflow complete
 ```
 
-### 3.4 Rate Limit Check Queries
+### 4.1 What Gets Re-executed vs Replayed
 
-```sql
--- Count total running jobs (system-wide)
-SELECT COUNT(*) FROM job_queue WHERE status = 'running';
+| Scenario | Behavior |
+|----------|----------|
+| Activity completed before crash | **Replayed** from history (no re-execution) |
+| Activity in-progress during crash | **Re-executed** from beginning |
+| Activity not yet started | **Executed** normally |
 
--- Count running jobs for a specific config
-SELECT COUNT(*) FROM job_queue WHERE config_id = ? AND status = 'running';
+## 5. Stateful Workflows and S3 Checkpointing
 
--- Get config's max concurrent jobs
-SELECT max_concurrent_jobs FROM reconciliations WHERE id = ?;
+### 5.1 The Problem
+
+Reconciliation stages are **stateful** - they operate on in-memory Polars DataFrames. However, Temporal activities are designed to be **stateless**.
+
+### 5.2 The Solution: S3 Checkpointing
+
+Each stage writes its output to S3. The next stage reads from S3.
+
+```mermaid
+flowchart LR
+    subgraph "Stage 1"
+        S1A[Load from Datasources]
+        S1B[Join + Rules]
+        S1C[Write to S3]
+    end
+
+    subgraph "Stage 2"
+        S2A[Read from S3]
+        S2B[Join + Rules]
+        S2C[Write to S3]
+    end
+
+    subgraph "Stage 3"
+        S3A[Read from S3]
+        S3B[Join + Rules]
+        S3C[Write Final Results]
+    end
+
+    S1A --> S1B --> S1C
+    S1C -->|S3 Path| S2A
+    S2A --> S2B --> S2C
+    S2C -->|S3 Path| S3A
+    S3A --> S3B --> S3C
 ```
 
-## 4. Job Status Lifecycle
+### 5.3 S3 Overhead Analysis
+
+**Dataset**: 1 million rows × 64 bytes per row = 64 MB raw
+
+| Metric | Value |
+|--------|-------|
+| Raw data size | 64 MB |
+| Parquet compressed (~4x) | ~16 MB |
+| S3 upload throughput | ~100-200 MB/s |
+| S3 download throughput | ~100-200 MB/s |
+| S3 request latency | ~50-100 ms |
+
+**Per Stage Boundary Overhead**:
+
+| Operation | Time |
+|-----------|------|
+| Upload 16 MB | ~0.1 sec |
+| Download 16 MB | ~0.1 sec |
+| Request latency (2 requests) | ~0.2 sec |
+| **Total per boundary** | **~0.4 seconds** |
+
+**For a 5-stage workflow** (4 stage boundaries):
+- S3 overhead: ~1.6 seconds
+- Actual stage processing: 10-60+ seconds per stage
+- **Verdict**: Overhead is negligible compared to processing time
+
+### 5.4 S3 Path Structure
 
 ```
-                         ┌────────────────┐
-                         │    pending     │
-                         └───────┬────────┘
-                                 │
-                    ┌────────────┼────────────┐
-                    │            │            │
-                    ▼            ▼            ▼
-             ┌──────────┐  ┌──────────┐  ┌──────────┐
-             │ running  │  │cancelled │  │ (timeout)│
-             └────┬─────┘  └──────────┘  └──────────┘
-                  │
-             ┌────┴────┐
-             │         │
-             ▼         ▼
-      ┌──────────┐ ┌──────────┐
-      │completed │ │  failed  │
-      └──────────┘ └─────┬────┘
-                         │
-                         ▼ (if retries remaining)
-                   ┌──────────┐
-                   │ pending  │ (re-queued)
-                   └──────────┘
+s3://recon-results/
+└── {run_id}/
+    ├── stage_1/
+    │   ├── matched.parquet
+    │   ├── unmatched_left.parquet
+    │   ├── unmatched_right.parquet
+    │   ├── match_failed.parquet
+    │   └── _metrics.json
+    ├── stage_2/
+    │   └── ...
+    └── stage_N/
+        └── ...
 ```
 
-| Status | Description |
+## 6. Generic Stage Activities
+
+### 6.1 Why Pre-defined Activities?
+
+Instead of a single dynamic `execute_stage` activity, we define **N pre-defined activities**:
+
+- `stage_1(config, input_paths) → StageResult`
+- `stage_2(config, input_paths) → StageResult`
+- `stage_3(config, input_paths) → StageResult`
+- ...
+- `stage_10(config, input_paths) → StageResult`
+
+**Benefits**:
+- Temporal tracks each activity type separately in history
+- Workflow can resume from the exact failed stage
+- Clear activity boundaries in Temporal UI
+
+### 6.2 Why 10 Stages?
+
+| Reason | Explanation |
 |--------|-------------|
-| `pending` | Queued, waiting for execution |
-| `running` | K8s Job launched and executing |
-| `completed` | Job finished successfully |
-| `failed` | Job failed after max retries |
-| `cancelled` | Cancelled by user |
+| Typical usage | Most reconciliation workflows have 2-5 stages |
+| Headroom | 10 provides room for complex multi-way reconciliations |
+| Extensibility | Can be increased if needed by adding more activity definitions |
 
-## 5. Core Operations
+### 6.3 Activity Behavior
 
-### 5.1 Submit Job
+All `stage_N` activities share the same implementation:
 
-```java
-@Service
-public class JobQueueService {
+1. Receive stage configuration and input paths
+2. Load data (from datasource or previous stage S3 output)
+3. Perform deduplication (if configured)
+4. Execute JOIN on join conditions
+5. Evaluate matching rules
+6. Categorize results (matched, unmatched_left, unmatched_right, match_failed)
+7. Write outputs to S3
+8. Return S3 paths and metrics
 
-    @Value("${job-queue.max-parallel-jobs:10}")
-    private int maxParallelJobs;
+## 7. Worker Configuration
 
-    @Transactional
-    public JobQueueEntry submitJob(UUID configId, JobRequest request) {
-        // Get config's rate limit
-        Reconciliation config = reconciliationRepository.findById(configId)
-            .orElseThrow(() -> new NotFoundException("Config not found"));
-        int configMaxJobs = config.getMaxConcurrentJobs();
+### 8.1 Python Worker Settings
 
-        // Check rate limits
-        int totalRunning = jobQueueRepository.countByStatus("running");
-        int configRunning = jobQueueRepository.countByConfigIdAndStatus(configId, "running");
+| Setting | Value | Rationale |
+|---------|-------|-----------|
+| `task_queue` | `"recon-stages"` | Single queue for all reconciliation work |
+| `max_concurrent_activities` | 5 | Limit parallel stage executions per worker |
+| `max_concurrent_workflows` | 10 | Limit parallel workflow orchestrations |
+| `activity_heartbeat_timeout` | 5 minutes | Detect stuck activities |
+| `activity_start_to_close_timeout` | 2 hours | Max time for a single stage |
 
-        boolean withinSystemLimit = totalRunning < maxParallelJobs;
-        boolean withinConfigLimit = configRunning < configMaxJobs;
-        boolean canLaunch = withinSystemLimit && withinConfigLimit;
+### 8.2 Scaling
 
-        // Create queue entry
-        JobQueueEntry entry = new JobQueueEntry();
-        entry.setConfigId(configId);
-        entry.setStatus(canLaunch ? "running" : "pending");
-        entry.setDateRangeStart(request.getDateRange().getStart());
-        entry.setDateRangeEnd(request.getDateRange().getEnd());
-        entry.setParameters(request.getParameters());
+```mermaid
+flowchart LR
+    subgraph "Worker Pool"
+        W1[Worker 1<br/>5 activities]
+        W2[Worker 2<br/>5 activities]
+        W3[Worker 3<br/>5 activities]
+    end
 
-        entry = jobQueueRepository.save(entry);
+    TQ[Task Queue] --> W1 & W2 & W3
 
-        // Launch immediately if within limits
-        if (canLaunch) {
-            launchK8sJob(entry);
-        }
-
-        return entry;
-    }
-
-    /**
-     * Check if we can launch more jobs (called when a job completes)
-     */
-    public boolean canLaunchMore(UUID configId) {
-        Reconciliation config = reconciliationRepository.findById(configId).orElse(null);
-        if (config == null) return false;
-
-        int totalRunning = jobQueueRepository.countByStatus("running");
-        int configRunning = jobQueueRepository.countByConfigIdAndStatus(configId, "running");
-
-        return totalRunning < maxParallelJobs && configRunning < config.getMaxConcurrentJobs();
-    }
-}
+    W1 & W2 & W3 --> S3[(S3)]
 ```
 
-### 5.2 Launch K8s Job
+**System-wide concurrency**: 3 workers × 5 activities = **15 max parallel stages**
 
-```java
-private void launchK8sJob(JobQueueEntry entry) {
-    String jobName = String.format("recon-%s-%s",
-        entry.getConfigId().toString().substring(0, 8),
-        entry.getId().toString().substring(0, 8)
-    );
+### 8.3 Auto-scaling with KEDA
 
-    V1Job k8sJob = new V1JobBuilder()
-        .withNewMetadata()
-            .withName(jobName)
-            .withNamespace("recon-jobs")
-            .addToLabels("config-id", entry.getConfigId().toString())
-            .addToLabels("job-id", entry.getId().toString())
-        .endMetadata()
-        .withNewSpec()
-            .withBackoffLimit(0)  // We handle retries ourselves
-            .withActiveDeadlineSeconds(3600L)
-            .withNewTemplate()
-                .withNewSpec()
-                    .withRestartPolicy("Never")
-                    .addNewContainer()
-                        .withName("recon")
-                        .withImage("recon-python:latest")
-                        .addNewEnv().withName("JOB_ID").withValue(entry.getId().toString()).endEnv()
-                        .addNewEnv().withName("CONFIG_ID").withValue(entry.getConfigId().toString()).endEnv()
-                        .addNewEnv().withName("CALLBACK_URL").withValue(callbackUrl).endEnv()
-                    .endContainer()
-                .endSpec()
-            .endTemplate()
-        .endSpec()
-        .build();
+Workers can be auto-scaled based on task queue depth:
 
-    batchV1Api.createNamespacedJob("recon-jobs", k8sJob, null, null, null, null);
+| Trigger | Action |
+|---------|--------|
+| Queue depth > 3 per worker | Scale up |
+| Queue empty for 5 minutes | Scale down |
+| Minimum replicas | 1 |
+| Maximum replicas | 10 |
 
-    // Update queue entry
-    entry.setK8sJobName(jobName);
-    entry.setStartedAt(Instant.now());
-    jobQueueRepository.save(entry);
-}
-```
+## 8. Rate Limiting
 
-### 5.3 Handle Job Callback
+### 8.1 System-Wide Rate Limiting
 
-```java
-@RestController
-@RequestMapping("/api/v1/jobs")
-public class JobCallbackController {
-
-    @PostMapping("/{jobId}/callback")
-    @Transactional
-    public ResponseEntity<?> handleCallback(
-            @PathVariable UUID jobId,
-            @RequestBody JobCallbackRequest request) {
-
-        JobQueueEntry entry = jobQueueRepository.findById(jobId)
-            .orElseThrow(() -> new NotFoundException("Job not found"));
-
-        // Update job status
-        entry.setStatus("completed");
-        entry.setCompletedAt(Instant.now());
-        entry.setResultStatus(request.getStatus());
-        entry.setResultPath(request.getResultPath());
-        jobQueueRepository.save(entry);
-
-        // Process next job in queue for this config
-        processNextInQueue(entry.getConfigId());
-
-        return ResponseEntity.ok().build();
-    }
-
-    /**
-     * Process pending jobs across all configs, respecting rate limits
-     */
-    private void processNextInQueue(UUID completedConfigId) {
-        // First, try to launch more jobs for the same config (if within limits)
-        if (canLaunchMore(completedConfigId)) {
-            Optional<JobQueueEntry> nextForConfig = jobQueueRepository
-                .findFirstByConfigIdAndStatusOrderByCreatedAt(completedConfigId, "pending");
-
-            if (nextForConfig.isPresent()) {
-                launchPendingJob(nextForConfig.get());
-                return;
-            }
-        }
-
-        // Then, try other configs with pending jobs (FIFO across all)
-        List<JobQueueEntry> pendingJobs = jobQueueRepository
-            .findByStatusOrderByCreatedAt("pending");
-
-        for (JobQueueEntry pending : pendingJobs) {
-            if (canLaunchMore(pending.getConfigId())) {
-                launchPendingJob(pending);
-                // Check if system limit reached after each launch
-                if (jobQueueRepository.countByStatus("running") >= maxParallelJobs) {
-                    break;
-                }
-            }
-        }
-    }
-
-    private void launchPendingJob(JobQueueEntry job) {
-        job.setStatus("running");
-        job.setAttempt(job.getAttempt() + 1);
-        jobQueueRepository.save(job);
-        launchK8sJob(job);
-    }
-}
-```
-
-### 5.4 Handle K8s Pod Failure
-
-```java
-@Component
-public class K8sJobWatcher {
-
-    @PostConstruct
-    public void startWatching() {
-        executorService.submit(() -> {
-            try {
-                watchJobs();
-            } catch (Exception e) {
-                log.error("K8s watch failed, restarting...", e);
-                startWatching();  // Reconnect
-            }
-        });
-    }
-
-    private void watchJobs() throws Exception {
-        BatchV1Api api = new BatchV1Api(k8sClient);
-
-        Watch<V1Job> watch = Watch.createWatch(
-            k8sClient,
-            api.listNamespacedJobCall(
-                "recon-jobs", null, null, null, null,
-                "app=reconciliation", null, null, null, null, true, null
-            ),
-            new TypeToken<Watch.Response<V1Job>>(){}.getType()
-        );
-
-        for (Watch.Response<V1Job> event : watch) {
-            if (event.type.equals("MODIFIED")) {
-                handleJobUpdate(event.object);
-            }
-        }
-    }
-
-    @Transactional
-    private void handleJobUpdate(V1Job k8sJob) {
-        String jobName = k8sJob.getMetadata().getName();
-        V1JobStatus status = k8sJob.getStatus();
-
-        // Check if job failed
-        if (status.getFailed() != null && status.getFailed() > 0) {
-            JobQueueEntry entry = jobQueueRepository.findByK8sJobName(jobName)
-                .orElse(null);
-
-            if (entry != null && entry.getStatus().equals("running")) {
-                handleJobFailure(entry);
-            }
-        }
-    }
-
-    private void handleJobFailure(JobQueueEntry entry) {
-        if (entry.getAttempt() < entry.getMaxAttempts()) {
-            // Retry: re-queue the job
-            log.info("Job {} failed, retrying (attempt {}/{})",
-                entry.getId(), entry.getAttempt() + 1, entry.getMaxAttempts());
-
-            entry.setStatus("pending");
-            entry.setK8sJobName(null);
-            entry.setStartedAt(null);
-            jobQueueRepository.save(entry);
-
-            // Process queue (will pick up this job again)
-            processNextInQueue(entry.getConfigId());
-        } else {
-            // Max retries exceeded
-            log.error("Job {} failed after {} attempts",
-                entry.getId(), entry.getMaxAttempts());
-
-            entry.setStatus("failed");
-            entry.setCompletedAt(Instant.now());
-            entry.setErrorMessage("Max retry attempts exceeded");
-            jobQueueRepository.save(entry);
-
-            // Process next pending job for this config
-            processNextInQueue(entry.getConfigId());
-        }
-    }
-}
-```
-
-### 5.5 Application Startup Recovery
-
-```java
-@Component
-public class JobQueueRecovery {
-
-    @EventListener(ApplicationReadyEvent.class)
-    @Transactional
-    public void recoverOnStartup() {
-        log.info("Starting job queue recovery...");
-
-        // 1. Find jobs stuck in "running" state
-        List<JobQueueEntry> staleJobs = jobQueueRepository.findByStatus("running");
-
-        for (JobQueueEntry job : staleJobs) {
-            boolean k8sJobExists = checkK8sJobExists(job.getK8sJobName());
-
-            if (!k8sJobExists) {
-                // K8s job gone - treat as failed, maybe retry
-                log.warn("Found stale job {} with no K8s job, recovering...", job.getId());
-                handleJobFailure(job);
-            } else {
-                // K8s job still running - keep watching
-                log.info("Job {} still running in K8s, continuing to watch", job.getId());
-            }
-        }
-
-        // 2. Process any pending jobs (respecting rate limits)
-        processPendingQueue();
-
-        log.info("Job queue recovery complete");
-    }
-
-    /**
-     * Process all pending jobs across configs, respecting rate limits
-     */
-    private void processPendingQueue() {
-        List<JobQueueEntry> pendingJobs = jobQueueRepository
-            .findByStatusOrderByCreatedAt("pending");
-
-        for (JobQueueEntry pending : pendingJobs) {
-            // Check system limit
-            int totalRunning = jobQueueRepository.countByStatus("running");
-            if (totalRunning >= maxParallelJobs) {
-                log.info("System limit reached ({}/{}), stopping queue processing",
-                    totalRunning, maxParallelJobs);
-                break;
-            }
-
-            // Check config limit
-            if (canLaunchMore(pending.getConfigId())) {
-                log.info("Launching pending job {} for config {}",
-                    pending.getId(), pending.getConfigId());
-                launchPendingJob(pending);
-            }
-        }
-    }
-}
-```
-
-## 6. Python Job Callback
-
-The Python reconciliation job calls back on completion:
-
-```python
-import requests
-import os
-import sys
-
-def main():
-    job_id = os.environ["JOB_ID"]
-    config_id = os.environ["CONFIG_ID"]
-    callback_url = os.environ["CALLBACK_URL"]
-
-    try:
-        # Run reconciliation
-        result_path = run_reconciliation(config_id)
-
-        # Success callback
-        requests.post(
-            f"{callback_url}/api/v1/jobs/{job_id}/callback",
-            json={
-                "status": "success",
-                "result_path": result_path
-            },
-            timeout=30
-        )
-    except Exception as e:
-        # Failure callback (optional - K8s event will also catch this)
-        try:
-            requests.post(
-                f"{callback_url}/api/v1/jobs/{job_id}/callback",
-                json={
-                    "status": "failed",
-                    "error": str(e)
-                },
-                timeout=30
-            )
-        except:
-            pass  # K8s watcher will handle it
-
-        sys.exit(1)  # Exit with error code
-
-if __name__ == "__main__":
-    main()
-```
-
-## 7. Queue Visibility API
-
-### 7.1 Get Queue Status
+Controlled by worker pool size and `max_concurrent_activities`:
 
 ```
-GET /api/v1/jobs/queue?config_id={configId}
+Total concurrent stages = Worker count × max_concurrent_activities
 ```
 
-Response:
-```json
-{
-  "config_id": "uuid-...",
-  "rate_limits": {
-    "config_max": 3,
-    "config_running": 2,
-    "config_available": 1,
-    "system_max": 10,
-    "system_running": 7,
-    "system_available": 3
-  },
-  "running": [
-    {
-      "job_id": "uuid-...",
-      "started_at": "2024-03-15T10:00:00Z",
-      "attempt": 1
-    },
-    {
-      "job_id": "uuid-...",
-      "started_at": "2024-03-15T10:02:00Z",
-      "attempt": 1
-    }
-  ],
-  "pending": [
-    {
-      "job_id": "uuid-...",
-      "position": 1,
-      "created_at": "2024-03-15T10:05:00Z"
-    }
-  ],
-  "running_count": 2,
-  "pending_count": 1
-}
+### 8.2 Per-Configuration Rate Limiting (Optional)
+
+For configurations requiring dedicated limits:
+
+```mermaid
+flowchart LR
+    subgraph "Task Queues"
+        TQ1[recon-stages-default]
+        TQ2[recon-stages-high-volume]
+    end
+
+    subgraph "Workers"
+        W1[Default Workers<br/>max: 5 each]
+        W2[Dedicated Worker<br/>max: 3]
+    end
+
+    TQ1 --> W1
+    TQ2 --> W2
 ```
 
-### 7.2 Get System Queue Status
+## 9. Error Handling and Retries
 
-```
-GET /api/v1/jobs/queue
-```
+### 9.1 Retry Flow
 
-Response:
-```json
-{
-  "system_limits": {
-    "max_parallel_jobs": 10,
-    "running": 7,
-    "pending": 15,
-    "available_slots": 3
-  },
-  "by_config": [
-    {
-      "config_id": "uuid-a",
-      "config_name": "daily_payment_recon",
-      "max_concurrent_jobs": 3,
-      "running": 2,
-      "pending": 5
-    },
-    {
-      "config_id": "uuid-b",
-      "config_name": "hourly_ledger_recon",
-      "max_concurrent_jobs": 1,
-      "running": 1,
-      "pending": 3
-    }
-  ]
-}
+```mermaid
+flowchart TD
+    A[Stage Activity Fails] --> B{Attempt < Max?}
+    B -->|Yes| C[Wait with backoff]
+    C --> D[Retry activity]
+    D --> A
+
+    B -->|No| E[Fail entire workflow]
 ```
 
-### 7.3 Cancel Pending Job
+### 9.2 Retry Policy Settings
 
-```
-DELETE /api/v1/jobs/{jobId}
-```
+| Setting | Value | Behavior |
+|---------|-------|----------|
+| Maximum attempts | 3 | Total tries including first |
+| Initial interval | 10 seconds | Wait before first retry |
+| Backoff coefficient | 2.0 | Double wait each retry |
+| Maximum interval | 5 minutes | Cap on retry wait time |
+| Non-retryable errors | Configuration errors, validation errors | Fail immediately |
 
-- If `pending`: Remove from queue
-- If `running`: Terminate K8s job, mark as cancelled
+### 9.3 Heartbeat Behavior
 
-## 8. Configuration
+Activities must send heartbeats during long operations. If heartbeats stop:
 
-### 8.1 System Settings
+| Heartbeat timeout exceeded | Action |
+|---------------------------|--------|
+| Worker crashed | Temporal reschedules to another worker |
+| Activity stuck | Temporal cancels and retries |
 
-```yaml
-job-queue:
-  # Rate limiting
-  max-parallel-jobs: 10              # System-wide limit
-  default-max-jobs-per-config: 1     # Default per-config limit
+## 10. Monitoring and Visibility
 
-  # Retry settings
-  max-attempts: 3                    # Retry attempts for failed jobs
-  job-timeout-seconds: 3600          # K8s job timeout (1 hour)
-  callback-timeout-seconds: 30       # Callback request timeout
+### 10.1 Temporal Web UI
 
-  k8s:
-    namespace: recon-jobs
-    image: recon-python:latest
-    resources:
-      requests:
-        memory: "2Gi"
-        cpu: "1000m"
-      limits:
-        memory: "8Gi"
-        cpu: "4000m"
-```
+Provides built-in visibility without custom dashboards:
 
-### 8.2 Per-Configuration Override
+| Feature | Description |
+|---------|-------------|
+| Workflow list | Filter by status (running, completed, failed) |
+| Workflow detail | Full event history, input/output |
+| Activity timeline | Execution duration, retry attempts |
+| Signal/Query interface | Send signals, run queries |
 
-```json
-// When creating/updating a reconciliation config
-POST /api/v1/reconciliations
-{
-  "name": "high_volume_daily_recon",
-  "max_concurrent_jobs": 3,    // Override: allow 3 parallel jobs
-  ...
-}
-```
+### 10.2 Workflow Queries
 
-### 8.3 Rate Limit Examples
+The Python workflow exposes queries for real-time status:
 
-| System Limit | Config A Limit | Config B Limit | Scenario |
-|--------------|----------------|----------------|----------|
-| 10 | 1 | 1 | Each config can run 1 job, up to 10 configs simultaneously |
-| 10 | 3 | 2 | Config A can run up to 3, Config B up to 2, total max 10 |
-| 10 | 5 | 5 | Each config can run up to 5, but combined max is still 10 |
+| Query | Returns |
+|-------|---------|
+| `get_status()` | Overall workflow status |
+| `get_stage_statuses()` | Per-stage completion status and metrics |
+| `get_current_stage()` | Currently executing stage |
 
-## 9. Monitoring
+### 10.3 Prometheus Metrics
 
-### 9.1 Metrics
+Temporal SDK exports metrics automatically:
 
 | Metric | Description |
 |--------|-------------|
-| `recon_jobs_pending` | Number of pending jobs (total) |
-| `recon_jobs_running` | Number of running jobs (total) |
-| `recon_jobs_pending_by_config` | Pending jobs by config_id label |
-| `recon_jobs_running_by_config` | Running jobs by config_id label |
-| `recon_job_queue_time_seconds` | Time spent in pending state |
-| `recon_job_duration_seconds` | Job execution duration |
-| `recon_job_failures_total` | Total failed jobs |
-| `recon_job_retries_total` | Total retry attempts |
-| `recon_rate_limit_rejections` | Jobs queued due to rate limit |
+| `temporal_workflow_active_count` | Currently running workflows |
+| `temporal_activity_execution_latency` | Activity duration histogram |
+| `temporal_activity_execution_failed` | Failed activity count |
+| `temporal_task_queue_backlog` | Pending tasks in queue |
 
-### 9.2 Alerts
+## 11. Database Schema Changes
 
-| Condition | Threshold | Action |
-|-----------|-----------|--------|
-| Queue backlog | > 50 pending | Alert ops |
-| Job stuck running | > 2 hours | Alert ops |
-| High failure rate | > 20% in 1 hour | Alert ops |
-| System limit sustained | At max for > 30 min | Alert ops (may need to increase limit) |
-| Config queue growing | > 10 pending for single config | Alert (possible misconfiguration) |
+### 11.1 Tables to Remove
+
+| Table | Reason |
+|-------|--------|
+| `job_queue` | Replaced by Temporal workflow history |
+| `system_settings` | Rate limits now in worker config |
+
+### 11.2 Updates to `runs` Table
+
+| Change | Column | Reason |
+|--------|--------|--------|
+| **Add** | `temporal_workflow_id` | Link to Temporal workflow |
+| **Add** | `temporal_run_id` | Specific run ID for retries |
+| **Remove** | `k8s_job_name` | No longer using K8s Jobs |
+| **Remove** | `k8s_pod_name` | No longer using K8s Jobs |
+| **Remove** | `attempt` | Temporal tracks retries |
+| **Remove** | `max_attempts` | Configured in retry policy |
+
+## 12. API Integration
+
+### 12.1 Starting a Reconciliation
+
+```mermaid
+sequenceDiagram
+    participant Client
+    participant API as Java API
+    participant DB as PostgreSQL
+    participant TS as Temporal
+
+    Client->>API: POST /api/v1/runs
+    API->>DB: Create run record
+    API->>TS: StartWorkflow(config)
+    TS-->>API: workflow_id
+    API->>DB: Update run with workflow_id
+    API-->>Client: 202 Accepted + run_id
+```
+
+### 12.2 Querying Status
+
+```mermaid
+sequenceDiagram
+    participant Client
+    participant API as Java API
+    participant TS as Temporal
+
+    Client->>API: GET /api/v1/runs/{id}/status
+    API->>TS: Query workflow (get_status, get_stage_statuses)
+    TS-->>API: WorkflowStatus, StageStatuses
+    API-->>Client: 200 OK + status details
+```
+
+### 12.3 Cancelling a Run
+
+```mermaid
+sequenceDiagram
+    participant Client
+    participant API as Java API
+    participant TS as Temporal
+    participant WF as Workflow
+
+    Client->>API: POST /api/v1/runs/{id}/cancel
+    API->>TS: Signal workflow (cancel)
+    TS->>WF: Deliver signal
+    WF->>WF: Set cancelled flag
+    WF->>TS: Complete with cancelled status
+    API-->>Client: 202 Accepted
+```
+
+## 13. Deployment Architecture
+
+```mermaid
+flowchart TB
+    subgraph "Kubernetes Cluster"
+        subgraph "API Layer"
+            JB1[Java Backend 1]
+            JB2[Java Backend 2]
+        end
+
+        subgraph "Temporal"
+            TS[Temporal Server]
+            TUI[Temporal UI]
+        end
+
+        subgraph "Workers"
+            PW1[Python Worker 1]
+            PW2[Python Worker 2]
+            PW3[Python Worker 3]
+        end
+    end
+
+    subgraph "External Services"
+        PG[(PostgreSQL<br/>Temporal DB)]
+        S3[(S3<br/>Data Storage)]
+    end
+
+    LB[Load Balancer] --> JB1 & JB2
+    JB1 & JB2 --> TS
+    TS --> PG
+    TS --> PW1 & PW2 & PW3
+    PW1 & PW2 & PW3 --> S3
+```
+
+### 13.1 Component Deployment
+
+| Component | Replicas | Resources | Notes |
+|-----------|----------|-----------|-------|
+| Temporal Server | 1 (or Temporal Cloud) | 2 CPU, 2 GB | Stateless, uses PostgreSQL |
+| Temporal UI | 1 | 0.5 CPU, 512 MB | Web interface |
+| Java Backend | 2+ | 1 CPU, 1 GB | API + Temporal client |
+| Python Worker | 3+ (auto-scaled) | 4 CPU, 8 GB | Polars processing |
+
+### 13.2 High Availability
+
+| Component | HA Strategy |
+|-----------|-------------|
+| Temporal Server | Multiple replicas behind load balancer (or use Temporal Cloud) |
+| Workers | Multiple replicas polling same task queue |
+| PostgreSQL | Managed service with replicas (RDS, Cloud SQL) |
+| S3 | AWS S3 (inherently highly available) |
+
+## 14. Summary: Before and After
+
+| Aspect | Before (PostgreSQL + K8s) | After (Temporal) |
+|--------|--------------------------|------------------|
+| **State storage** | `job_queue` table | Temporal workflow history |
+| **Orchestration** | Java + K8s Jobs | Python workflow |
+| **Rate limiting** | SQL COUNT queries | Worker concurrency |
+| **Failure detection** | K8s Job watcher | Activity heartbeat |
+| **Job completion** | HTTP callback | Activity completion |
+| **Retries** | Manual state machine | Declarative policy |
+| **Recovery** | Startup recovery code | Automatic |
+| **Visibility** | Custom API + metrics | Temporal UI + queries |
+| **Stage resumability** | None | S3 checkpoints + replay |
+| **Code complexity** | ~500 lines | ~150 lines |
+
+## 15. Future Enhancements
+
+The following features are planned for future implementation:
+
+| Enhancement | Description |
+|-------------|-------------|
+| **Parallel Stage Execution (DAG)** | Execute independent stages concurrently using `asyncio.gather`. Stages with the same `order` and no inter-dependencies can run in parallel, with results merged at synchronization points. |
+| **Per-Configuration Task Queues** | Dedicated task queues and workers for high-volume configurations, enabling isolated rate limiting and resource allocation. |
+| **Advanced Failure Policies** | `SKIP_DEPENDENTS` (skip downstream stages, continue other branches) and `CONTINUE` (log failure, continue all branches) policies for DAG workflows. |
